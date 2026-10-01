@@ -1,0 +1,26 @@
+# Base de datos local de desarrollo: PostgreSQL 16 + PostGIS 3.4.
+# Al crear el volumen por primera vez aplica la migración y los datos de demostración.
+# Para recrearla desde cero: npm run db:reset
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: torre-control-db
+    environment:
+      POSTGRES_DB: torre_control
+      POSTGRES_USER: torre
+      POSTGRES_PASSWORD: torre_dev # sólo desarrollo local
+      TZ: America/Santiago
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./database/migrations/001_init.sql:/docker-entrypoint-initdb.d/20_001_init.sql:ro
+      - ./database/seeds/001_demo_data.sql:/docker-entrypoint-initdb.d/90_001_demo_data.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U torre -d torre_control"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  db-data:
