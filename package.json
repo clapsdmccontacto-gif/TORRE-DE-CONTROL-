@@ -4,10 +4,12 @@
   "description": "Torre de Control Logística · Constructor Center (Los Ángeles, Chile)",
   "scripts": {
     "setup": "npm ci --prefix backend && npm ci --prefix frontend",
+    "dev:web": "npm run dev --prefix frontend",
+    "dev:web:api": "npm run dev:api --prefix frontend",
+    "dev:api": "npm run start:dev --prefix backend",
+    "build:html": "npm run build:html --prefix frontend",
     "db:up": "docker compose up -d db",
     "db:reset": "docker compose down -v && docker compose up -d db",
-    "dev:api": "npm run start:dev --prefix backend",
-    "dev:web": "npm run dev --prefix frontend",
     "test": "npm test --prefix backend && npm run test:e2e --prefix backend",
     "check": "npm run typecheck --prefix backend && npm run lint --prefix backend && npm test && npm run build --prefix frontend && npm run lint --prefix frontend"
   }

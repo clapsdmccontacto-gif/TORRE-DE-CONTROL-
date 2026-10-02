@@ -1,30 +1,76 @@
 @import "tailwindcss";
 
-/* Tokens con la convención de shadcn/ui (tema neutral). */
+/* Tokens con la convención de shadcn/ui. Tema claro en :root; el oscuro sigue la
+   preferencia del sistema o un data-theme explícito en <html>. */
 :root {
+  color-scheme: light;
   --radius: 0.625rem;
-  --background: oklch(0.985 0 0);
-  --foreground: oklch(0.145 0 0);
+  --background: oklch(0.985 0.002 260);
+  --foreground: oklch(0.16 0.004 260);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  --card-foreground: oklch(0.16 0.004 260);
+  --primary: oklch(0.22 0.006 260);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.955 0 0);
-  --muted-foreground: oklch(0.5 0 0);
-  --accent: oklch(0.95 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --border: oklch(0.912 0 0);
-  --input: oklch(0.912 0 0);
-  --ring: oklch(0.708 0 0);
+  --secondary: oklch(0.965 0.002 260);
+  --secondary-foreground: oklch(0.22 0.006 260);
+  --muted: oklch(0.955 0.002 260);
+  --muted-foreground: oklch(0.49 0.006 260);
+  --accent: oklch(0.95 0.003 260);
+  --accent-foreground: oklch(0.22 0.006 260);
+  --border: oklch(0.912 0.003 260);
+  --input: oklch(0.912 0.003 260);
+  --ring: oklch(0.708 0.004 260);
   /* Medidores: pista y relleno de la misma rampa neutral. */
-  --meter-track: oklch(0.93 0 0);
-  --meter-fill: oklch(0.45 0 0);
+  --meter-track: oklch(0.93 0.003 260);
+  --meter-fill: oklch(0.45 0.006 260);
   /* Estados reservados: siempre acompañados de ícono + texto, nunca solos. */
   --status-good: #0ca30c;
   --status-warning: #fab219;
   --status-critical: #d03b3b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --background: oklch(0.16 0.004 260);
+    --foreground: oklch(0.96 0 0);
+    --card: oklch(0.205 0.004 260);
+    --card-foreground: oklch(0.96 0 0);
+    --primary: oklch(0.92 0 0);
+    --primary-foreground: oklch(0.2 0 0);
+    --secondary: oklch(0.27 0.004 260);
+    --secondary-foreground: oklch(0.96 0 0);
+    --muted: oklch(0.27 0.004 260);
+    --muted-foreground: oklch(0.72 0 0);
+    --accent: oklch(0.28 0.004 260);
+    --accent-foreground: oklch(0.96 0 0);
+    --border: oklch(1 0 0 / 11%);
+    --input: oklch(1 0 0 / 16%);
+    --ring: oklch(0.56 0 0);
+    --meter-track: oklch(0.3 0.004 260);
+    --meter-fill: oklch(0.8 0 0);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --background: oklch(0.16 0.004 260);
+  --foreground: oklch(0.96 0 0);
+  --card: oklch(0.205 0.004 260);
+  --card-foreground: oklch(0.96 0 0);
+  --primary: oklch(0.92 0 0);
+  --primary-foreground: oklch(0.2 0 0);
+  --secondary: oklch(0.27 0.004 260);
+  --secondary-foreground: oklch(0.96 0 0);
+  --muted: oklch(0.27 0.004 260);
+  --muted-foreground: oklch(0.72 0 0);
+  --accent: oklch(0.28 0.004 260);
+  --accent-foreground: oklch(0.96 0 0);
+  --border: oklch(1 0 0 / 11%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: oklch(0.56 0 0);
+  --meter-track: oklch(0.3 0.004 260);
+  --meter-fill: oklch(0.8 0 0);
+  color-scheme: dark;
 }
 
 @theme inline {

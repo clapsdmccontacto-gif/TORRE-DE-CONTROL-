@@ -15,14 +15,14 @@ import { StatusBanner } from '@/components/status';
 import { Badge } from '@/components/ui/badge';
 import { CubicajePage } from '@/features/load-planning/CubicajePage';
 import { MixCheckPage } from '@/features/picking/MixCheckPage';
-import { api, errorMessage } from '@/lib/api';
+import { api, apiMode, errorMessage } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import type { CartSpec, Product } from '@/types/api';
 
 interface NavItem {
   label: string;
   icon: LucideIcon;
-  /** Ruta hash; sin ruta = módulo de una fase posterior. */
+  /** Ruta hash (#mezcla); sin ruta = módulo de una fase posterior. */
   route?: string;
   description?: string;
 }
@@ -35,7 +35,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
       {
         label: 'Validador de mezcla',
         icon: ShieldAlert,
-        route: '/picking/mezcla',
+        route: 'mezcla',
         description:
           'Bloquea ítems frágiles o herramientas junto a carga pesada en el mismo carro.',
       },
@@ -48,7 +48,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
       {
         label: 'Simulador de cubicaje',
         icon: Truck,
-        route: '/despacho/cubicaje',
+        route: 'cubicaje',
         description: 'Peso, volumen, largo, pluma y carga por eje para elegir el vehículo.',
       },
       { label: 'Restricción urbana', icon: Clock },
@@ -58,7 +58,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
   },
 ];
 
-const DEFAULT_ROUTE = '/picking/mezcla';
+const DEFAULT_ROUTE = 'mezcla';
 
 function useHashRoute(): string {
   const read = () => window.location.hash.slice(1) || DEFAULT_ROUTE;
@@ -119,12 +119,17 @@ export default function App() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="border-b bg-card px-4 py-4 sm:px-6">
-          <p className="text-xs text-muted-foreground">Bodega Los Ángeles</p>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span>Bodega Los Ángeles</span>
+            <Badge variant="outline">
+              {apiMode === 'local' ? 'Demo · cálculo en el dispositivo' : 'Conectado a la API'}
+            </Badge>
+          </div>
           <h1 className="text-xl font-semibold">{current.label}</h1>
           {current.description && (
             <p className="text-sm text-muted-foreground">{current.description}</p>
           )}
-          <nav className="mt-3 flex gap-2 lg:hidden">
+          <nav className="mt-3 flex flex-wrap gap-2 lg:hidden">
             {NAV.flatMap((g) => g.items)
               .filter((item) => item.route)
               .map((item) => (
@@ -136,7 +141,8 @@ export default function App() {
         <main className="flex-1 p-4 sm:p-6">
           {error && (
             <StatusBanner status="critical" title="No se pudo cargar el catálogo">
-              {error} Inicie el backend con <code>npm run dev:api</code>.
+              {error}
+              {apiMode === 'http' && ' Inicie el backend con npm run dev:api en otra terminal.'}
             </StatusBanner>
           )}
           {!catalog && !error && (
@@ -145,7 +151,7 @@ export default function App() {
             </p>
           )}
           {catalog &&
-            (current.route === '/despacho/cubicaje' ? (
+            (current.route === 'cubicaje' ? (
               <CubicajePage products={catalog.products} />
             ) : (
               <MixCheckPage products={catalog.products} cartTypes={catalog.cartTypes} />

@@ -13,6 +13,7 @@ Esta primera entrega deja la base del proyecto:
 | Regla crítica: **validación de mezcla incompatible** en el carro de picking | Hecho, con tests |
 | Regla crítica: **cubicaje** (peso, volumen, largo, pluma y carga por eje) | Hecho, con tests |
 | API REST (NestJS 12) y pantallas de ambas reglas (React 19 + Tailwind 4) | Hecho |
+| App en **un solo archivo HTML** que funciona sin servidor (celular o computador) | Hecho, generado en cada push por GitHub Actions |
 | Persistencia real, staging, restricciones, tracking, e-POD | Próximas fases (ver hoja de ruta) |
 
 ---
@@ -114,6 +115,7 @@ torre-control/
 │   │       └── epod/                 (fase 3) firma + foto georreferenciada
 │   └── test/api.e2e-spec.ts      # pruebas de la API completa con supertest
 └── frontend/                     # Vite 8 · React 19 · Tailwind 4 · componentes estilo shadcn/ui
+    ├── scripts/inline-html.mjs   # empaqueta la app en dist/torre-control.html
     └── src/
         ├── App.tsx               # layout de la torre de control y navegación por módulos
         ├── components/
@@ -127,7 +129,10 @@ torre-control/
         │   ├── staging/                          (fase 2)
         │   ├── tracking/                         (fase 3) mapa en vivo
         │   └── epod/                             (fase 3) vista móvil del conductor
-        ├── lib/                  # cliente API, formato es-CL, utilidades
+        ├── lib/
+        │   ├── api.ts            # elige el modo: local (sin servidor) o HTTP (backend)
+        │   ├── local-api.ts      # ejecuta en el navegador las reglas de backend/src (alias @core)
+        │   └── format.ts, utils.ts
         └── types/api.ts          # contratos de la API
 ```
 
@@ -350,22 +355,46 @@ llamar al cubicaje.
 Errores: `400 SOLICITUD_INVALIDA` con detalle por campo (Zod) y `422` para reglas de negocio
 (`SKU_DESCONOCIDO`, `CANTIDAD_INVALIDA`, `CARGA_VACIA`).
 
-## 6. Cómo ejecutar
+## 6. Usar la app
+
+La interfaz tiene dos modos y las reglas son **el mismo código** en ambos (el frontend
+importa el dominio desde `backend/src`):
+
+| Modo | Cuándo | Qué necesita |
+|---|---|---|
+| **Local** (por defecto) | Probar y usar las reglas desde cualquier dispositivo | Nada: todo se calcula en el navegador |
+| **API** | Cuando haya persistencia (fase 2): pedidos, carros y entregas reales | El backend NestJS corriendo |
+
+### Abrir desde el celular o el computador
+
+- **Archivo HTML:** cada push a GitHub ejecuta el workflow *Torre de Control* y deja
+  `torre-control.html` en *Actions → (última ejecución) → Artifacts*. Se descarga y se abre
+  con doble clic o desde el gestor de archivos del teléfono; no necesita internet.
+  También se genera localmente con `npm run build:html` (queda en `frontend/dist/`).
+- **GitHub Pages (opcional):** este repositorio es privado y Pages en repositorios privados
+  requiere plan GitHub Pro o superior; además el sitio publicado queda **público**. Si se
+  decide publicarlo: *Settings → Pages → Source: GitHub Actions* y luego
+  *Settings → Secrets and variables → Actions → Variables* con `DEPLOY_PAGES = true`.
+  Desde ese momento cada push a la rama por defecto publica la app.
+
+### Desarrollo
 
 Requisitos: Node.js 22 o superior y Docker (sólo para la base de datos).
 
 ```bash
 cd torre-control
 npm run setup          # instala backend y frontend (npm ci)
+npm run dev:web        # interfaz en http://localhost:5173, modo local
 npm run dev:api        # API en http://localhost:3000/api/v1
-npm run dev:web        # Torre de control en http://localhost:5173 (proxy /api → :3000)
+npm run dev:web:api    # interfaz en modo API (proxy /api → :3000)
 
 npm run check          # typecheck + lint + tests unitarios + e2e + build del frontend
+npm run build:html     # app en un solo archivo: frontend/dist/torre-control.html
 npm run db:up          # PostgreSQL + PostGIS con esquema y datos de demostración
 ```
 
-La API todavía funciona con catálogo y flota **en memoria** (los mismos datos del seed), así
-que no necesita la base de datos para probar las dos reglas.
+La API todavía usa catálogo y flota **en memoria** (los mismos datos del seed), así que no
+necesita la base de datos para probar las dos reglas.
 
 ## 7. Supuestos y valores a validar con la operación
 

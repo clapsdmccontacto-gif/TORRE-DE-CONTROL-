@@ -1,5 +1,5 @@
 import { LoaderCircle, ScanLine } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ProductLineInput, ProductLinesEditor } from '@/components/product-lines';
 import { Meter, StatusBanner, StatusLabel, type Status } from '@/components/status';
 import { Button } from '@/components/ui/button';
@@ -10,11 +10,19 @@ import { formatKg, formatM3 } from '@/lib/format';
 import type {
   CartSpec,
   CartType,
+  MixCheckRequest,
   MixCheckResponse,
   MixDecision,
   Product,
   SkuQuantity,
 } from '@/types/api';
+
+/** Ejemplo con el que abre la pantalla: cemento hacia un carro con herramientas. */
+const SAMPLE: MixCheckRequest = {
+  cartType: 'MODULAR',
+  currentLines: [{ sku: 'MAK-HP1630', quantity: 2 }],
+  incoming: { sku: 'CEM-ESP-25', quantity: 2 },
+};
 
 const DECISION: Record<MixDecision, { status: Status; title: string }> = {
   PERMITIDO: { status: 'good', title: 'Puede subir al carro' },
@@ -29,12 +37,12 @@ export function MixCheckPage({
   products: Product[];
   cartTypes: CartSpec[];
 }) {
-  const [cartType, setCartType] = useState<CartType>('MODULAR');
-  const [cartLines, setCartLines] = useState<SkuQuantity[]>([{ sku: 'MAK-HP1630', quantity: 2 }]);
-  const [incoming, setIncoming] = useState<SkuQuantity>({ sku: 'CEM-ESP-25', quantity: 2 });
+  const [cartType, setCartType] = useState<CartType>(SAMPLE.cartType);
+  const [cartLines, setCartLines] = useState<SkuQuantity[]>(SAMPLE.currentLines);
+  const [incoming, setIncoming] = useState<SkuQuantity>(SAMPLE.incoming);
   const [result, setResult] = useState<MixCheckResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
+  const [pending, setPending] = useState(true);
 
   // Cualquier cambio en el carro invalida la validación anterior.
   const edit =
@@ -56,6 +64,19 @@ export function MixCheckPage({
       setPending(false);
     }
   }
+
+  // Abre con el ejemplo ya evaluado, para que se vea de inmediato qué hace la herramienta.
+  useEffect(() => {
+    let active = true;
+    api
+      .mixCheck(SAMPLE)
+      .then((response) => active && setResult(response))
+      .catch((e: unknown) => active && setError(errorMessage(e)))
+      .finally(() => active && setPending(false));
+    return () => {
+      active = false;
+    };
+  }, []);
 
   function confirmIntoCart() {
     const existing = cartLines.find((l) => l.sku === incoming.sku);

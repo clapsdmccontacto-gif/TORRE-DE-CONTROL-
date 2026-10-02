@@ -1,5 +1,5 @@
 import { Calculator, LoaderCircle } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ProductLinesEditor } from '@/components/product-lines';
 import { Meter, StatTile, StatusBanner, StatusLabel } from '@/components/status';
 import { Button } from '@/components/ui/button';
@@ -7,19 +7,34 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { api, errorMessage } from '@/lib/api';
 import { formatKg, formatM, formatM3, formatPct } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import type { CubicajeResponse, Product, SkuQuantity, VehicleEvaluation } from '@/types/api';
+import type {
+  CubicajeRequest,
+  CubicajeResponse,
+  Product,
+  SkuQuantity,
+  VehicleEvaluation,
+} from '@/types/api';
 
-export function CubicajePage({ products }: { products: Product[] }) {
-  const [lines, setLines] = useState<SkuQuantity[]>([
+/** Ejemplo con el que abre la pantalla: pedido mixto con fierros de 6 m. */
+const SAMPLE: CubicajeRequest = {
+  lines: [
     { sku: 'CEM-ESP-25', quantity: 60 },
     { sku: 'FIE-A630-12', quantity: 20 },
     { sku: 'MAK-HP1630', quantity: 2 },
-  ]);
-  const [siteHasUnloadingEquipment, setSiteHasUnloadingEquipment] = useState(false);
-  const [loadCenterRatio, setLoadCenterRatio] = useState(0.5);
+  ],
+  siteHasUnloadingEquipment: false,
+  loadCenterRatio: 0.5,
+};
+
+export function CubicajePage({ products }: { products: Product[] }) {
+  const [lines, setLines] = useState<SkuQuantity[]>(SAMPLE.lines);
+  const [siteHasUnloadingEquipment, setSiteHasUnloadingEquipment] = useState(
+    SAMPLE.siteHasUnloadingEquipment,
+  );
+  const [loadCenterRatio, setLoadCenterRatio] = useState(SAMPLE.loadCenterRatio);
   const [result, setResult] = useState<CubicajeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
+  const [pending, setPending] = useState(true);
 
   async function calculate() {
     setPending(true);
@@ -33,6 +48,19 @@ export function CubicajePage({ products }: { products: Product[] }) {
       setPending(false);
     }
   }
+
+  // Abre con el ejemplo ya evaluado, para que se vea de inmediato qué hace la herramienta.
+  useEffect(() => {
+    let active = true;
+    api
+      .cubicaje(SAMPLE)
+      .then((response) => active && setResult(response))
+      .catch((e: unknown) => active && setError(errorMessage(e)))
+      .finally(() => active && setPending(false));
+    return () => {
+      active = false;
+    };
+  }, []);
 
   return (
     <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,28rem)_minmax(0,1fr)]">
@@ -123,7 +151,7 @@ function CubicajeResult({ result }: { result: CubicajeResponse }) {
   const { profile, recommendation, splitSuggestion } = result;
   return (
     <>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 2xl:grid-cols-4">
         <StatTile
           label="Peso total"
           value={formatKg(profile.totalWeightKg)}

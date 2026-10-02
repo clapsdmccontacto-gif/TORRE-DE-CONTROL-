@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:api": "vite --mode api",
     "build": "tsc -b && vite build",
+    "build:html": "npm run build && node scripts/inline-html.mjs",
     "lint": "oxlint",
     "preview": "vite preview",
     "typecheck": "tsc -b",

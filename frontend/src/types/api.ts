@@ -107,3 +107,17 @@ export interface ApiErrorBody {
   message: string;
   issues?: { path: string; message: string }[];
 }
+
+export interface MixCheckRequest {
+  cartType: CartType;
+  currentLines: SkuQuantity[];
+  incoming: SkuQuantity;
+}
+
+/** Operaciones que usa la interfaz; las implementa el backend (HTTP) o el motor local. */
+export interface TorreApi {
+  products(): Promise<Product[]>;
+  cartTypes(): Promise<CartSpec[]>;
+  mixCheck(request: MixCheckRequest): Promise<MixCheckResponse>;
+  cubicaje(request: CubicajeRequest): Promise<CubicajeResponse>;
+}
