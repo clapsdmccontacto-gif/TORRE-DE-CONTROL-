@@ -24,8 +24,8 @@ export function CloudSetupCard() {
           <li>Toque «Activar guardado en la nube» y entre con su cuenta de GitHub (gratis).</li>
           <li>Toque «Apply» y espere unos minutos: se crean el servidor y la base de datos.</li>
           <li>
-            Abra la dirección que entrega Render (usuario <code>torre</code>; la clave está en
-            Environment → BASIC_AUTH_PASSWORD) y use esa dirección en todos los equipos.
+            Vuelva a abrir esta misma app: se conecta sola, le pide crear la clave de la empresa y
+            sube a la nube lo que ya cargó en este equipo.
           </li>
         </ol>
         <LinkButton

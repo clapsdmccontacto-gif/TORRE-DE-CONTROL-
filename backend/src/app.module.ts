@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { HealthController } from './health/health.controller.js';
 import { CatalogModule } from './modules/catalog/catalog.module.js';
+import { CloudModule } from './modules/cloud/cloud.module.js';
 import { LoadPlanningModule } from './modules/load-planning/load-planning.module.js';
 import { MasterDataModule } from './modules/master-data/master-data.module.js';
 import { PickingModule } from './modules/picking/picking.module.js';
@@ -9,6 +10,7 @@ import { TrackingModule } from './modules/tracking/tracking.module.js';
 
 @Module({
   imports: [
+    CloudModule,
     MasterDataModule,
     CatalogModule,
     PickingModule,

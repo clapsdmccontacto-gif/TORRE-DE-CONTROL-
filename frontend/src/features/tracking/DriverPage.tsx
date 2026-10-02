@@ -352,8 +352,8 @@ export function DriverPage() {
             </Button>
             {apiMode === 'local' && (
               <p className="text-xs text-muted-foreground">
-                Esta versión no está conectada a un servidor: la ubicación sólo se ve en este mismo
-                teléfono. Para que la torre de control lo vea, abra la app desde el servidor.
+                Este teléfono no está conectado a la nube: la ubicación sólo se ve aquí. Pida a la
+                torre de control el enlace para conductores (está en «Flota y bodega»).
               </p>
             )}
           </CardContent>

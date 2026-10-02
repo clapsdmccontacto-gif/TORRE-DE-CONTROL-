@@ -49,9 +49,13 @@ secretos (la única clave es la de TomTom de la empresa, ver abajo).
 - App en internet: cada push a `main` publica la interfaz en GitHub Pages (rama `gh-pages`,
   workflow `.github/workflows/ci.yml`): https://clapsdmccontacto-gif.github.io/TORRE-DE-CONTROL-/
 - `Dockerfile` (API + interfaz en modo API en un servicio) y `render.yaml` para Render.
-- Variables: `PORT`, `DATABASE_URL` (PostgreSQL de los datos de la empresa; sin ella, en
-  memoria),
-  `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` (clave de acceso a toda la app), `STATIC_DIR`.
+- Nube: la app (también la de GitHub Pages) busca el servidor en `CLOUD_URL`
+  (`frontend/src/lib/cloud.ts`, igual al nombre del servicio en `render.yaml`) y entra con la
+  clave de acceso de la empresa (`cloud/`: se crea la primera vez, scrypt, `x-torre-key` o
+  `?key=` en SSE). `CloudGate` sube los datos locales si la nube está vacía.
+- Variables: `PORT`, `DATABASE_URL` (PostgreSQL de los datos de la empresa y de la clave;
+  sin ella, en memoria), `CORS_ORIGINS` (por defecto GitHub Pages), `ACCESS_CONTROL`
+  (`off` sólo en los e2e), `STATIC_DIR`; opcionales `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD`.
 - Mapa base: selector en la app (`frontend/src/components/map/basemaps.ts`): TomTom con
   tráfico por defecto (clave de la empresa incluida), Esri sin clave, MapTiler con clave, o
   sin mapa. Proveedor fijo al compilar con

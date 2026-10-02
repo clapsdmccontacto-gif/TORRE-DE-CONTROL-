@@ -2,12 +2,14 @@
 
 **Guardado en la nube (un clic):**
 [![Activar en Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/clapsdmccontacto-gif/TORRE-DE-CONTROL-)
-— crea el servidor y la base de datos con la cuenta de GitHub de la empresa. Con eso, lo que
-se agrega en un equipo se ve en todos y el mapa ve los teléfonos de los conductores
-(sección 6).
+— crea el servidor y la base de datos con la cuenta de GitHub de la empresa (el único paso
+que requiere a la empresa: la cuenta es suya).
 
-**Versión sin servidor:** https://clapsdmccontacto-gif.github.io/TORRE-DE-CONTROL-/ (celular
-o computador, sin instalar nada): guarda los datos sólo en el equipo donde se abre.
+**La app:** https://clapsdmccontacto-gif.github.io/TORRE-DE-CONTROL-/ (celular o computador,
+sin instalar nada). Al abrir busca la nube sola (`torre-control-constructor-center.onrender.com`):
+si está activada, la primera vez pide crear la clave de acceso de la empresa, sube lo que se
+haya cargado en ese equipo y desde ahí todo se guarda en la nube y se ve en todos los
+equipos; si no, funciona guardando en el equipo.
 
 La app **parte vacía**: no trae camiones, obras, pedidos ni productos de muestra, ni
 camiones simulados. Se cargan en *Flota y bodega*, *Productos* y *Obras y pedidos*
@@ -119,6 +121,7 @@ TORRE-DE-CONTROL-/
 │   │   ├── common/               # DomainError, filtro HTTP 422, ZodValidationPipe
 │   │   ├── health/
 │   │   └── modules/
+│   │       ├── cloud/            # clave de acceso de la empresa (AccessControl) y /cloud
 │   │       ├── master-data/      # DATOS DE LA EMPRESA: bodega, camiones, productos, obras,
 │   │       │   ├── domain/       #   pedidos · master-data.ts (validaciones, + spec)
 │   │       │   ├── application/  #   master-data.ts (sin framework) · state-store.port.ts
@@ -155,6 +158,7 @@ TORRE-DE-CONTROL-/
     ├── scripts/inline-html.mjs   # empaqueta la app en dist/torre-control.html
     └── src/
         ├── App.tsx               # layout de la torre de control y navegación por módulos
+        ├── components/CloudGate.tsx # busca la nube, crea o pide la clave, sube datos locales
         ├── components/
         │   ├── ui/               # button, card, badge, input (convención shadcn/ui)
         │   ├── status.tsx        # estados con ícono + texto, medidores, KPIs
@@ -511,6 +515,8 @@ navegador de ese equipo.
 | Método | Ruta | Uso |
 |---|---|---|
 | GET | `/api/v1/health` | Salud |
+| GET · POST | `/api/v1/cloud/status` · `/cloud/claim` | ¿Hay nube y tiene clave? · crear la clave (sólo la primera vez) |
+| GET | `/api/v1/cloud/session` | Confirma la clave del equipo |
 | GET | `/api/v1/master-data` | Bodega, tipos de vehículo, camiones, productos, obras y pedidos |
 | PUT | `/api/v1/master-data/depot` | Guarda la bodega de salida |
 | POST · DELETE | `/api/v1/master-data/vehicles` · `/vehicles/:plate` | Agrega o edita · quita un camión |
@@ -536,7 +542,8 @@ navegador de ese equipo.
 Errores: `400 SOLICITUD_INVALIDA` con detalle por campo (Zod) y `422` para reglas de negocio
 (`SKU_DESCONOCIDO`, `CANTIDAD_INVALIDA`, `CARGA_VACIA`, `AJUSTE_INVALIDO`, `PLAN_PUBLICADO`,
 `PATENTE_INVALIDA`, `SIN_BODEGA`, `SIN_VEHICULOS`, `OBRA_CON_PEDIDOS`, `PRODUCTO_EN_USO`,
-`SESION_DESCONOCIDA`).
+`SESION_DESCONOCIDA`, `NUBE_YA_CONFIGURADA`), `401 CLAVE_INCORRECTA`, `403 NUBE_SIN_CLAVE` y
+`429 DEMASIADOS_INTENTOS`.
 
 ## 6. Usar la app
 
@@ -560,10 +567,18 @@ PostgreSQL gratuita donde quedan los datos de la empresa):
    GitHub* (gratis).
 2. Tocar *Apply*. Render crea la base de datos y el servicio (la primera vez tarda unos
    minutos).
-3. Abrir la URL que entrega Render (`https://torre-control-xxxx.onrender.com`). Usuario
-   `torre`; la clave está en el servicio → *Environment* → `BASIC_AUTH_PASSWORD`.
-4. Cargar camiones y bodega en *Flota y bodega*; compartir con los conductores el enlace
-   `…/#conductor` que aparece ahí; en la oficina, `…/#mapa`.
+3. Abrir la app (el enlace de GitHub Pages o la dirección de Render): se conecta sola y pide
+   **crear la clave de acceso de la empresa** (sólo la primera vez; se guarda derivada con
+   scrypt). Lo cargado antes en ese equipo sin nube se sube solo.
+4. En *Flota y bodega* están los enlaces con la clave incluida: uno para los teléfonos de
+   los conductores (`#conductor?clave=…`) y otro para otros computadores (`#mapa?clave=…`).
+   Quien abre el enlace normal escribe la clave una vez.
+
+La API exige la clave en `x-torre-key` (o `?key=` en el flujo en vivo); 10 intentos fallidos
+bloquean esa IP por 10 minutos. La app en GitHub Pages llama a la API desde otro dominio:
+`CORS_ORIGINS` (por defecto `https://clapsdmccontacto-gif.github.io`). La dirección que la
+app busca está en `frontend/src/lib/cloud.ts` y depende del nombre del servicio en
+`render.yaml`: si Render le agregara un sufijo, corregirla ahí (o `VITE_CLOUD_URL`).
 
 Notas: el plan gratuito de Render duerme tras 15 minutos sin uso (la primera visita tarda
 cerca de un minuto; mientras un conductor envía su GPS no duerme). La base PostgreSQL

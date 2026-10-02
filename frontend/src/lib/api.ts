@@ -1,4 +1,5 @@
 import { ApiError } from '@/lib/api-error';
+import { readCloudKey } from '@/lib/cloud';
 import { localApi } from '@/lib/local-api';
 import type { ApiErrorBody, FleetSnapshot, RoutePlan, TorreApi } from '@/types/api';
 
@@ -8,12 +9,20 @@ function httpApi(baseUrl: string): TorreApi {
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
     let response: Response;
     try {
+      const key = readCloudKey();
       response = await fetch(`${baseUrl}${path}`, {
         ...init,
-        headers: { 'content-type': 'application/json', ...init?.headers },
+        headers: {
+          'content-type': 'application/json',
+          ...(key ? { 'x-torre-key': key } : {}),
+          ...init?.headers,
+        },
       });
     } catch {
-      throw new ApiError(0, { code: 'SIN_CONEXION', message: 'No hay conexión con la API.' });
+      throw new ApiError(0, {
+        code: 'SIN_CONEXION',
+        message: 'No hay conexión con la nube. Revise internet; se reintenta solo.',
+      });
     }
 
     const body: unknown = await response.json().catch(() => null);
@@ -22,7 +31,7 @@ function httpApi(baseUrl: string): TorreApi {
         response.status,
         (body as ApiErrorBody | null) ?? {
           code: 'ERROR_HTTP',
-          message: `La API respondió ${response.status}. ¿Está corriendo el backend en el puerto 3000?`,
+          message: `El servidor respondió ${response.status}. Intente de nuevo en un momento.`,
         },
       );
     }
@@ -74,8 +83,12 @@ function httpApi(baseUrl: string): TorreApi {
       request(`/tracking/sessions/${encodeURIComponent(sessionId)}/track`),
     liveFleet: () => request('/tracking/live'),
     subscribeFleet: (onSnapshot, onError) => {
-      // EventSource reintenta solo si se corta la conexión.
-      const source = new EventSource(`${baseUrl}/tracking/stream`);
+      // EventSource reintenta solo si se corta la conexión; no admite cabeceras: la clave va
+      // en la dirección.
+      const key = readCloudKey();
+      const source = new EventSource(
+        `${baseUrl}/tracking/stream${key ? `?key=${encodeURIComponent(key)}` : ''}`,
+      );
       source.onmessage = (event) => onSnapshot(JSON.parse(event.data) as FleetSnapshot);
       source.onerror = () => onError?.();
       return () => source.close();
@@ -84,10 +97,21 @@ function httpApi(baseUrl: string): TorreApi {
 }
 
 /**
- * Sin VITE_API_URL la app calcula todo en el navegador (modo local).
- * Con VITE_API_URL (p. ej. `npm run dev:api`, que usa .env.api) llama al backend NestJS.
+ * La app parte en modo local (todo en el navegador) y `CloudGate` la conecta a la nube al
+ * abrir: con VITE_API_URL (la interfaz que sirve el propio servidor, `.env.api`) o con el
+ * servidor de Render que encuentra en `CLOUD_URL` (la versión de GitHub Pages).
  */
-const API_URL = import.meta.env.VITE_API_URL as string | undefined;
+export const API_URL = import.meta.env.VITE_API_URL as string | undefined;
 
-export const apiMode: 'local' | 'http' = API_URL ? 'http' : 'local';
-export const api: TorreApi = API_URL ? httpApi(API_URL) : localApi;
+let implementation: TorreApi = localApi;
+export let apiMode: 'local' | 'http' = 'local';
+
+export function connectApi(baseUrl: string): void {
+  implementation = httpApi(baseUrl);
+  apiMode = 'http';
+}
+
+/** Siempre llama a la implementación vigente (local o nube). */
+export const api: TorreApi = new Proxy({} as TorreApi, {
+  get: (_target, operation) => implementation[operation as keyof TorreApi],
+});

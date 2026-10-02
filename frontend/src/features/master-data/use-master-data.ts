@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, errorMessage } from '@/lib/api';
+import { api, apiMode, errorMessage } from '@/lib/api';
 import type { MasterDataView } from '@/types/api';
+
+/** En la nube, lo que agregan otros equipos aparece solo cada este intervalo. */
+const REFRESH_MS = 30_000;
 
 /** Datos maestros con un `change` que guarda y refresca la vista (o deja el error). */
 export function useMasterData() {
@@ -10,12 +13,18 @@ export function useMasterData() {
 
   useEffect(() => {
     let active = true;
-    api
-      .masterData()
-      .then((view) => active && setData(view))
-      .catch((e: unknown) => active && setError(errorMessage(e)));
+    const load = () =>
+      api
+        .masterData()
+        .then((view) => active && setData(view))
+        .catch((e: unknown) => active && setError(errorMessage(e)));
+    void load();
+    const timer = setInterval(() => {
+      if (apiMode === 'http' && document.visibilityState === 'visible') void load();
+    }, REFRESH_MS);
     return () => {
       active = false;
+      clearInterval(timer);
     };
   }, []);
 

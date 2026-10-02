@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input, NativeSelect } from '@/components/ui/input';
 import { api, apiMode } from '@/lib/api';
+import { shareLink } from '@/lib/cloud';
 import { formatKg } from '@/lib/format';
 import type { LatLng, MasterDataView } from '@/types/api';
 import { useMasterData } from './use-master-data';
@@ -58,20 +59,9 @@ function VehiclesCard({
   const [vehicleCode, setVehicleCode] = useState(
     data.vehicleTypes[1]?.code ?? data.vehicleTypes[0].code,
   );
-  const [copied, setCopied] = useState(false);
-  const driverLink = `${window.location.href.split('#')[0]}#conductor`;
 
   async function add() {
     if (await change(() => api.saveVehicle({ plate, vehicleCode }))) setPlate('');
-  }
-
-  async function copyLink() {
-    try {
-      await navigator.clipboard.writeText(driverLink);
-      setCopied(true);
-    } catch {
-      setCopied(false);
-    }
   }
 
   return (
@@ -160,20 +150,49 @@ function VehiclesCard({
           </Button>
         </form>
 
-        <div className="grid gap-2 rounded-lg bg-muted px-3 py-2">
-          <p className="text-xs text-muted-foreground">
-            Enlace para los teléfonos de los conductores (ábranlo, escriban su nombre y elijan el
-            camión):
-          </p>
-          <div className="flex min-w-0 items-center gap-2">
-            <code className="min-w-0 flex-1 truncate text-xs">{driverLink}</code>
-            <Button variant="outline" size="sm" onClick={() => void copyLink()}>
-              <Copy /> {copied ? 'Copiado' : 'Copiar'}
-            </Button>
-          </div>
+        <div className="grid gap-3 rounded-lg bg-muted px-3 py-2">
+          <ShareLink
+            label="Enlace para los teléfonos de los conductores (abren, escriben su nombre y eligen el camión):"
+            link={shareLink('conductor')}
+          />
+          {apiMode === 'http' && (
+            <>
+              <ShareLink
+                label="Enlace para otros computadores de la oficina:"
+                link={shareLink('mapa')}
+              />
+              <p className="text-xs text-muted-foreground">
+                Estos enlaces traen la clave de acceso: compártalos sólo con su equipo.
+              </p>
+            </>
+          )}
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function ShareLink({ label, link }: { label: string; link: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="grid gap-1">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <div className="flex min-w-0 items-center gap-2">
+        <code className="min-w-0 flex-1 truncate text-xs">{link}</code>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() =>
+            void navigator.clipboard.writeText(link).then(
+              () => setCopied(true),
+              () => setCopied(false),
+            )
+          }
+        >
+          <Copy /> {copied ? 'Copiado' : 'Copiar'}
+        </Button>
+      </div>
+    </div>
   );
 }
 

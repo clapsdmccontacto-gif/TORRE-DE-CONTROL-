@@ -112,7 +112,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
 const DEFAULT_ROUTE = 'mapa';
 
 function useHashRoute(): string {
-  const read = () => window.location.hash.slice(1) || DEFAULT_ROUTE;
+  const read = () => window.location.hash.slice(1).split('?')[0] || DEFAULT_ROUTE;
   const [route, setRoute] = useState(read);
   useEffect(() => {
     const onChange = () => setRoute(read());
@@ -208,8 +208,8 @@ export default function App() {
             <span>Constructor Center</span>
             <Badge variant="outline">
               {apiMode === 'local'
-                ? 'Sin servidor · datos sólo en este equipo'
-                : 'Conectado al servidor'}
+                ? 'Sin nube · datos sólo en este equipo'
+                : 'En la nube · datos compartidos entre equipos'}
             </Badge>
           </div>
           <h1 className="text-xl font-semibold">{current.label}</h1>
@@ -229,7 +229,6 @@ export default function App() {
           {needsCatalog && error && (
             <StatusBanner status="critical" title="No se pudo cargar el catálogo">
               {error}
-              {apiMode === 'http' && ' Inicie el backend con npm run dev:api en otra terminal.'}
             </StatusBanner>
           )}
           {needsCatalog && !catalog && !error && (

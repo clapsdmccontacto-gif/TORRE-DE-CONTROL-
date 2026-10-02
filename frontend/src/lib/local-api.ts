@@ -16,20 +16,20 @@ import { TrackingHub } from '@core/modules/tracking/application/tracking-hub';
 import { ApiError } from '@/lib/api-error';
 import type { TorreApi } from '@/types/api';
 
-const STORAGE_KEY = 'torre-control.master-data';
+export const LOCAL_DATA_KEY = 'torre-control.master-data';
 
 /** Datos maestros en el navegador. */
 const localStore: StateStore = {
   load: async () => {
     try {
-      return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') as unknown;
+      return JSON.parse(localStorage.getItem(LOCAL_DATA_KEY) ?? 'null') as unknown;
     } catch {
       return null;
     }
   },
   save: async (snapshot) => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+      localStorage.setItem(LOCAL_DATA_KEY, JSON.stringify(snapshot));
     } catch {
       throw new DomainError(
         'SIN_ALMACENAMIENTO',

@@ -1,25 +1,26 @@
 import pg from 'pg';
 import type { StateStore } from '../application/state-store.port.js';
 
-const KEY = 'master-data';
-
 /**
- * Datos maestros en PostgreSQL (tabla `app_state`, migración 004). Crea la tabla si no
+ * Un documento JSON por clave en PostgreSQL (tabla `app_state`, migración 004): los datos
+ * maestros (`master-data`) y la clave de acceso a la nube (`access`). Crea la tabla si no
  * existe para funcionar también en una base nueva (por ejemplo, la gratuita de Render).
  */
 export class PostgresStateStore implements StateStore {
   private readonly pool: pg.Pool;
+  private readonly key: string;
   private schemaReady: Promise<void> | null = null;
 
-  constructor(connectionString: string) {
+  constructor(connectionString: string, key = 'master-data') {
     this.pool = new pg.Pool({ connectionString, max: 3 });
+    this.key = key;
   }
 
   async load(): Promise<unknown> {
     await this.ensureSchema();
     const result = await this.pool.query<{ value: unknown }>(
       'SELECT value FROM app_state WHERE key = $1',
-      [KEY],
+      [this.key],
     );
     return result.rows[0]?.value ?? null;
   }
@@ -29,7 +30,7 @@ export class PostgresStateStore implements StateStore {
     await this.pool.query(
       `INSERT INTO app_state (key, value, updated_at) VALUES ($1, $2, now())
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
-      [KEY, JSON.stringify(snapshot)],
+      [this.key, JSON.stringify(snapshot)],
     );
   }
 
@@ -49,6 +50,10 @@ export class PostgresStateStore implements StateStore {
       .then(
         () => undefined,
         (error: unknown) => {
+          // Dos almacenes creando la tabla a la vez en una base nueva: PostgreSQL rechaza al
+          // segundo aunque diga IF NOT EXISTS. La tabla ya existe, así que está bien.
+          const code = (error as { code?: string } | null)?.code;
+          if (code === '23505' || code === '42P07') return;
           this.schemaReady = null; // Se reintenta en la próxima operación.
           throw error;
         },

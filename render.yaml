@@ -1,8 +1,10 @@
 # Blueprint de Render: publica la Torre de Control (API + interfaz) con HTTPS, necesario
 # para que el GPS funcione en los teléfonos, y una base PostgreSQL gratuita donde quedan
 # guardados camiones, bodega, productos, obras y pedidos.
-# En Render: New → Blueprint → este repositorio → Apply.
-# La clave de acceso se genera sola: verla en el servicio → Environment → BASIC_AUTH_PASSWORD.
+# En Render: New → Blueprint → este repositorio → Apply (o el botón «Activar guardado en la
+# nube» de la app). El nombre del servicio define su dirección, que la app en GitHub Pages
+# busca sola: https://torre-control-constructor-center.onrender.com. La clave de acceso la
+# crea quien abre la app por primera vez.
 databases:
   - name: torre-control-db
     plan: free
@@ -11,7 +13,7 @@ databases:
 
 services:
   - type: web
-    name: torre-control
+    name: torre-control-constructor-center
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
@@ -22,7 +24,3 @@ services:
         fromDatabase:
           name: torre-control-db
           property: connectionString
-      - key: BASIC_AUTH_USER
-        value: torre
-      - key: BASIC_AUTH_PASSWORD
-        generateValue: true
