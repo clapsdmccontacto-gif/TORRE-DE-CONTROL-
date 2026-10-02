@@ -1,9 +1,13 @@
 # Torre de Control Logística · Constructor Center
 
-**Abrir la app:** https://clapsdmccontacto-gif.github.io/TORRE-DE-CONTROL-/ (celular o
-computador, sin instalar nada). Esa versión no tiene servidor: guarda los datos sólo en el
-equipo donde se abre. Para el **rastreo real** (teléfonos de conductores → mapa de la torre)
-se usa la app publicada con el servidor en Render (sección 6).
+**Guardado en la nube (un clic):**
+[![Activar en Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/clapsdmccontacto-gif/TORRE-DE-CONTROL-)
+— crea el servidor y la base de datos con la cuenta de GitHub de la empresa. Con eso, lo que
+se agrega en un equipo se ve en todos y el mapa ve los teléfonos de los conductores
+(sección 6).
+
+**Versión sin servidor:** https://clapsdmccontacto-gif.github.io/TORRE-DE-CONTROL-/ (celular
+o computador, sin instalar nada): guarda los datos sólo en el equipo donde se abre.
 
 La app **parte vacía**: no trae camiones, obras, pedidos ni productos de muestra, ni
 camiones simulados. Se cargan en *Flota y bodega*, *Productos* y *Obras y pedidos*
@@ -551,9 +555,11 @@ hablar con el mismo servidor. El repositorio trae la imagen (`Dockerfile`: API +
 un solo servicio) y el blueprint de Render (`render.yaml`: el servicio y una base
 PostgreSQL gratuita donde quedan los datos de la empresa):
 
-1. Crear una cuenta en [render.com](https://render.com) con *Sign in with GitHub* (gratis).
-2. *New → Blueprint* → elegir este repositorio → *Apply*. Render crea la base de datos y el
-   servicio (la primera vez tarda unos minutos).
+1. Abrir el enlace [Activar en Render](https://render.com/deploy?repo=https://github.com/clapsdmccontacto-gif/TORRE-DE-CONTROL-)
+   (o en render.com: *New → Blueprint* → este repositorio) y entrar con *Sign in with
+   GitHub* (gratis).
+2. Tocar *Apply*. Render crea la base de datos y el servicio (la primera vez tarda unos
+   minutos).
 3. Abrir la URL que entrega Render (`https://torre-control-xxxx.onrender.com`). Usuario
    `torre`; la clave está en el servicio → *Environment* → `BASIC_AUTH_PASSWORD`.
 4. Cargar camiones y bodega en *Flota y bodega*; compartir con los conductores el enlace

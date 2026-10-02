@@ -1,11 +1,12 @@
 import { Copy, Plus, Save, Trash2, Truck, Warehouse } from 'lucide-react';
 import { useState } from 'react';
+import { CloudSetupCard } from '@/components/cloud-setup';
 import { LocationPicker } from '@/components/map/LocationPicker';
 import { StatusBanner, StatusLabel } from '@/components/status';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input, NativeSelect } from '@/components/ui/input';
-import { api } from '@/lib/api';
+import { api, apiMode } from '@/lib/api';
 import { formatKg } from '@/lib/format';
 import type { LatLng, MasterDataView } from '@/types/api';
 import { useMasterData } from './use-master-data';
@@ -20,6 +21,11 @@ export function FleetPage() {
           <StatusBanner status="critical" title="No se pudo guardar">
             {error}
           </StatusBanner>
+        </div>
+      )}
+      {apiMode === 'local' && (
+        <div className="xl:col-span-2">
+          <CloudSetupCard />
         </div>
       )}
       {data && (

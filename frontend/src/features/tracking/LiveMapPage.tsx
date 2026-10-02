@@ -34,6 +34,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { NativeSelect } from '@/components/ui/input';
 import { RoadRouteDetails } from '@/features/routing/RoadRouteDetails';
 import { api, apiMode, errorMessage } from '@/lib/api';
+import { CLOUD_DEPLOY_URL } from '@/lib/cloud';
 import { STOP_STATE_LABEL, formatClock, formatKg, formatKm } from '@/lib/format';
 import {
   ROUTING_VEHICLES,
@@ -224,8 +225,17 @@ export function LiveMapPage() {
       {apiMode === 'local' && (
         <StatusBanner status="warning" title="Esta versión no está conectada a un servidor">
           Sólo ve el «Modo conductor» abierto en este mismo equipo, y sus datos quedan guardados
-          sólo aquí. Para ver en este mapa los teléfonos de los conductores, abra la app desde el
-          servidor (Render, ver README sección 6).
+          sólo aquí. Para ver en este mapa los teléfonos de los conductores y compartir los datos
+          entre equipos,{' '}
+          <a
+            className="font-medium text-foreground underline"
+            href={CLOUD_DEPLOY_URL}
+            target="_blank"
+            rel="noreferrer"
+          >
+            active el guardado en la nube
+          </a>{' '}
+          (instrucciones en «Flota y bodega»).
         </StatusBanner>
       )}
       {devices.length === 0 && registeredVehicles !== null && (
