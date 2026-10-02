@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 /* Tokens con la convención de shadcn/ui. Tema claro en :root; el oscuro sigue la
    preferencia del sistema o un data-theme explícito en <html>. */
@@ -34,7 +34,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
+  :root:not([data-theme='light']) {
     --background: oklch(0.16 0.004 260);
     --foreground: oklch(0.96 0 0);
     --card: oklch(0.205 0.004 260);
@@ -59,7 +59,7 @@
   }
 }
 
-:root[data-theme="dark"] {
+:root[data-theme='dark'] {
   --background: oklch(0.16 0.004 260);
   --foreground: oklch(0.96 0 0);
   --card: oklch(0.205 0.004 260);
@@ -137,14 +137,6 @@
   color: var(--foreground);
   border-color: var(--border);
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .map-tiles {
-    filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.9);
-  }
-}
-:root[data-theme="dark"] .map-tiles {
-  filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.9);
-}
 .map-icon {
   background: none;
   border: 0;
@@ -155,10 +147,23 @@
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.route-1 { stroke: var(--series-1); --route-color: var(--series-1); }
-.route-2 { stroke: var(--series-2); --route-color: var(--series-2); }
-.route-3 { stroke: var(--series-3); --route-color: var(--series-3); }
-.route-other { stroke: var(--foreground); stroke-dasharray: 8 6; --route-color: var(--foreground); }
+.route-1 {
+  stroke: var(--series-1);
+  --route-color: var(--series-1);
+}
+.route-2 {
+  stroke: var(--series-2);
+  --route-color: var(--series-2);
+}
+.route-3 {
+  stroke: var(--series-3);
+  --route-color: var(--series-3);
+}
+.route-other {
+  stroke: var(--foreground);
+  stroke-dasharray: 8 6;
+  --route-color: var(--foreground);
+}
 .route-planned {
   stroke: var(--muted-foreground);
   stroke-width: 3;

@@ -498,6 +498,12 @@ Todos están en un solo lugar y son fáciles de cambiar:
 - **Consumo de diésel por vehículo** (vacío / plena carga, L/100 km) y **precio del diésel**
   (1.050 CLP/L por defecto, editable en pantalla): reemplazar por los rendimientos reales de
   cada camión.
+- **Mapa base**: CARTO (datos de OpenStreetMap), con versión clara y oscura. Es gratuito con
+  límites de uso; para operación comercial a escala conviene un proveedor con cuenta propia
+  (MapTiler, Stadia u otro), que se configura al compilar con `VITE_MAP_TILE_URL`,
+  `VITE_MAP_TILE_URL_DARK` y `VITE_MAP_ATTRIBUTION`. No usar `tile.openstreetmap.org`
+  directamente: sus servidores voluntarios bloquean ("Access blocked") los pedidos sin
+  Referer, como los del HTML abierto como archivo.
 - **Velocidad media 45 km/h y factor de recorrido 1,3**: calibrar con los trayectos que ya
   registra el GPS (`v_session_tracks`).
 
