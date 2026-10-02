@@ -9,6 +9,13 @@ import { planLoad } from '@core/modules/load-planning/domain/cubicaje';
 import { DEFAULT_FLEET } from '@core/modules/load-planning/infrastructure/default-fleet';
 import { DEFAULT_CART_SPECS } from '@core/modules/picking/domain/cart';
 import { checkCartAddition } from '@core/modules/picking/domain/mix-validator';
+import { RoutePlanner } from '@core/modules/routing/application/route-planner';
+import {
+  DEMO_DEPOT,
+  DEMO_ORDERS,
+  DEMO_UNITS,
+} from '@core/modules/routing/infrastructure/demo-network';
+import { TrackingHub } from '@core/modules/tracking/application/tracking-hub';
 import { ApiError } from '@/lib/api-error';
 import type { TorreApi } from '@/types/api';
 
@@ -17,6 +24,37 @@ const catalog = {
   findBySkus: async (skus: readonly string[]) =>
     DEMO_PRODUCTS.filter((product) => skus.includes(product.sku)),
 };
+
+/**
+ * Planificador y rastreo en memoria del navegador, en modo demostración: el plan del día
+ * queda publicado y camiones simulados lo recorren. Un teléfono en "Modo conductor" en
+ * esta misma pestaña también aparece en el mapa; entre dispositivos distintos hace falta
+ * el backend (modo API).
+ */
+let fleetEngine: { planner: RoutePlanner; hub: TrackingHub } | null = null;
+
+function engine() {
+  if (fleetEngine) return fleetEngine;
+  const planner = new RoutePlanner({
+    depot: DEMO_DEPOT,
+    orders: () => DEMO_ORDERS,
+    fleet: DEFAULT_FLEET,
+    units: DEMO_UNITS,
+  });
+  const hub = new TrackingHub({ units: DEMO_UNITS, activePlan: () => planner.activePlan() });
+  planner.onPublish((plan) => hub.startSimulation(plan));
+  const plan = planner.optimize({
+    deliveryIds: DEMO_ORDERS.map((o) => o.id),
+    dieselPriceClp: 1_050,
+  });
+  planner.publish(plan.id);
+  fleetEngine = { planner, hub };
+  return fleetEngine;
+}
+
+const TICK_MS = 2_000;
+let tickTimer: ReturnType<typeof setInterval> | null = null;
+let subscribers = 0;
 
 /** Traduce los errores de dominio al mismo formato que responde la API (422). */
 async function run<T>(operation: () => Promise<T>): Promise<T> {
@@ -49,4 +87,36 @@ export const localApi: TorreApi = {
         loadCenterRatio: request.loadCenterRatio,
       }),
     ),
+
+  deliveries: async () => engine().planner.deliveries(),
+  optimizeRoutes: (request) => run(async () => engine().planner.optimize(request)),
+  publishPlan: (planId) => run(async () => engine().planner.publish(planId)),
+  activePlan: async () => engine().planner.activePlan(),
+
+  fleetUnits: async () => engine().planner.fleetUnits(),
+  startDriverSession: (input) => run(async () => engine().hub.startSession(input)),
+  sendPositions: (sessionId, fixes) => run(async () => engine().hub.ingest(sessionId, fixes)),
+  endDriverSession: (sessionId) => run(async () => engine().hub.endSession(sessionId)),
+  deviceTrack: (sessionId) => run(async () => engine().hub.track(sessionId)),
+  liveFleet: async () => {
+    const { hub } = engine();
+    hub.tick();
+    return hub.snapshot();
+  },
+  subscribeFleet: (onSnapshot) => {
+    const { hub } = engine();
+    const unsubscribe = hub.subscribe(onSnapshot);
+    subscribers++;
+    tickTimer ??= setInterval(() => hub.tick(), TICK_MS);
+    hub.tick();
+    onSnapshot(hub.snapshot());
+    return () => {
+      unsubscribe();
+      subscribers--;
+      if (subscribers === 0 && tickTimer) {
+        clearInterval(tickTimer);
+        tickTimer = null;
+      }
+    };
+  },
 };

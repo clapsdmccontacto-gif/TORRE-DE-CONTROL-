@@ -46,6 +46,13 @@ export interface VehicleType {
   craneMaxLiftKg: number | null;
   /** Costo relativo por km (CLP); se usa para comparar alternativas, no para facturar. */
   costPerKm: number;
+  /** Consumo de diésel vacío y a plena carga (L/100 km); entre ambos se interpola por carga. */
+  fuel: FuelProfile;
+}
+
+export interface FuelProfile {
+  emptyLitersPer100Km: number;
+  fullLitersPer100Km: number;
 }
 
 export function tareKg(vehicle: VehicleType): number {

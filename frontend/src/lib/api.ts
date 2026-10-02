@@ -1,6 +1,6 @@
 import { ApiError } from '@/lib/api-error';
 import { localApi } from '@/lib/local-api';
-import type { ApiErrorBody, TorreApi } from '@/types/api';
+import type { ApiErrorBody, FleetSnapshot, RoutePlan, TorreApi } from '@/types/api';
 
 export { errorMessage } from '@/lib/api-error';
 
@@ -37,6 +37,29 @@ function httpApi(baseUrl: string): TorreApi {
     cartTypes: () => request('/picking/cart-types'),
     mixCheck: (payload) => post('/picking/mix-check', payload),
     cubicaje: (payload) => post('/load-planning/cubicaje', payload),
+
+    deliveries: () => request('/routing/deliveries'),
+    optimizeRoutes: (payload) => post('/routing/optimize', payload),
+    publishPlan: (planId) => post(`/routing/plans/${encodeURIComponent(planId)}/publish`, {}),
+    activePlan: async () =>
+      (await request<{ plan: RoutePlan | null }>('/routing/plans/active')).plan,
+
+    fleetUnits: () => request('/tracking/units'),
+    startDriverSession: (input) => post('/tracking/sessions', input),
+    sendPositions: (sessionId, fixes) =>
+      post(`/tracking/sessions/${encodeURIComponent(sessionId)}/positions`, { fixes }),
+    endDriverSession: (sessionId) =>
+      post(`/tracking/sessions/${encodeURIComponent(sessionId)}/end`, {}),
+    deviceTrack: (sessionId) =>
+      request(`/tracking/sessions/${encodeURIComponent(sessionId)}/track`),
+    liveFleet: () => request('/tracking/live'),
+    subscribeFleet: (onSnapshot, onError) => {
+      // EventSource reintenta solo si se corta la conexión.
+      const source = new EventSource(`${baseUrl}/tracking/stream`);
+      source.onmessage = (event) => onSnapshot(JSON.parse(event.data) as FleetSnapshot);
+      source.onerror = () => onError?.();
+      return () => source.close();
+    },
   };
 }
 

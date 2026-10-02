@@ -14,6 +14,7 @@ const truck: VehicleType = {
   rearAxle: { type: 'SIMPLE_RUEDA_DOBLE', tareKg: 1_000, ratingKg: 6_000 },
   craneMaxLiftKg: null,
   costPerKm: 1,
+  fuel: { emptyLitersPer100Km: 10, fullLitersPer100Km: 20 },
 };
 
 describe('computeAxleLoads', () => {

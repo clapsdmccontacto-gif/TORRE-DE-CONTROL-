@@ -18,6 +18,7 @@ export const DEFAULT_FLEET: readonly VehicleType[] = [
     rearAxle: { type: 'SIMPLE_RUEDA_SIMPLE', tareKg: 790, ratingKg: 1_850 },
     craneMaxLiftKg: null,
     costPerKm: 450,
+    fuel: { emptyLitersPer100Km: 9.5, fullLitersPer100Km: 12.5 },
   },
   {
     code: 'CAMION_3_4',
@@ -31,6 +32,7 @@ export const DEFAULT_FLEET: readonly VehicleType[] = [
     rearAxle: { type: 'SIMPLE_RUEDA_DOBLE', tareKg: 1_100, ratingKg: 4_800 },
     craneMaxLiftKg: null,
     costPerKm: 900,
+    fuel: { emptyLitersPer100Km: 15, fullLitersPer100Km: 21 },
   },
   {
     code: 'CAMION_PLUMA',
@@ -44,5 +46,6 @@ export const DEFAULT_FLEET: readonly VehicleType[] = [
     rearAxle: { type: 'SIMPLE_RUEDA_DOBLE', tareKg: 3_900, ratingKg: 11_000 },
     craneMaxLiftKg: 2_000,
     costPerKm: 1_600,
+    fuel: { emptyLitersPer100Km: 27, fullLitersPer100Km: 37 },
   },
 ];

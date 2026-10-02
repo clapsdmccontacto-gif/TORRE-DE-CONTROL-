@@ -1,6 +1,14 @@
 // Contratos de la API (espejo de los tipos del backend). Próximo paso: generarlos
 // desde OpenAPI o moverlos a un paquete compartido para que no diverjan.
 
+import type { DeliveryView, RoutePlan } from '@core/modules/routing/application/route-planner';
+import type { PositionFix } from '@core/modules/tracking/domain/tracking';
+import type {
+  DriverSession,
+  FleetSnapshot,
+  IngestResult,
+} from '@core/modules/tracking/application/tracking-hub';
+
 export type HandlingClass =
   'GRANEL_PESADO' | 'LARGO' | 'GENERAL' | 'FRAGIL' | 'HERRAMIENTA' | 'QUIMICO';
 
@@ -114,10 +122,51 @@ export interface MixCheckRequest {
   incoming: SkuQuantity;
 }
 
+// --- Rutas y rastreo: mismos tipos que el backend (alias @core), sin copiarlos ---------
+export type { LatLng } from '@core/common/geo';
+export type { PlannedRoute, PlannedStop, PlanTotals } from '@core/modules/routing/domain/optimizer';
+export type { DeliveryView, RoutePlan } from '@core/modules/routing/application/route-planner';
+export type { DeviceStatus, PositionFix, StopState } from '@core/modules/tracking/domain/tracking';
+export type {
+  CargoLine,
+  DriverSession,
+  FleetSnapshot,
+  IngestResult,
+  LiveDevice,
+  LiveStop,
+  TrackingEvent,
+} from '@core/modules/tracking/application/tracking-hub';
+
+export interface FleetUnitView {
+  plate: string;
+  vehicleName: string;
+  /** Paradas asignadas en el plan publicado. */
+  stops: number;
+}
+
+export interface TrackResponse {
+  fixes: PositionFix[];
+  summary: { distanceKm: number; durationMin: number; maxSpeedKmh: number };
+}
+
 /** Operaciones que usa la interfaz; las implementa el backend (HTTP) o el motor local. */
 export interface TorreApi {
   products(): Promise<Product[]>;
   cartTypes(): Promise<CartSpec[]>;
   mixCheck(request: MixCheckRequest): Promise<MixCheckResponse>;
   cubicaje(request: CubicajeRequest): Promise<CubicajeResponse>;
+
+  deliveries(): Promise<DeliveryView[]>;
+  optimizeRoutes(request: { deliveryIds: string[]; dieselPriceClp: number }): Promise<RoutePlan>;
+  publishPlan(planId: string): Promise<RoutePlan>;
+  activePlan(): Promise<RoutePlan | null>;
+
+  fleetUnits(): Promise<FleetUnitView[]>;
+  startDriverSession(input: { driverName: string; vehiclePlate: string }): Promise<DriverSession>;
+  sendPositions(sessionId: string, fixes: PositionFix[]): Promise<IngestResult>;
+  endDriverSession(sessionId: string): Promise<DriverSession>;
+  deviceTrack(sessionId: string): Promise<TrackResponse>;
+  liveFleet(): Promise<FleetSnapshot>;
+  /** Fotos de la flota en vivo; devuelve la función para dejar de escuchar. */
+  subscribeFleet(onSnapshot: (snapshot: FleetSnapshot) => void, onError?: () => void): () => void;
 }

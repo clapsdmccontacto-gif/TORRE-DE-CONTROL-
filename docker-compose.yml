@@ -15,6 +15,7 @@ services:
     volumes:
       - db-data:/var/lib/postgresql/data
       - ./database/migrations/001_init.sql:/docker-entrypoint-initdb.d/20_001_init.sql:ro
+      - ./database/migrations/002_tracking_routing.sql:/docker-entrypoint-initdb.d/21_002_tracking_routing.sql:ro
       - ./database/seeds/001_demo_data.sql:/docker-entrypoint-initdb.d/90_001_demo_data.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U torre -d torre_control"]

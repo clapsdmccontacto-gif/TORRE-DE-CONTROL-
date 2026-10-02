@@ -2,11 +2,13 @@ import {
   ClipboardList,
   Clock,
   LoaderCircle,
-  MapPin,
+  Map as MapIcon,
   PenLine,
   QrCode,
   RadioTower,
+  Route,
   ShieldAlert,
+  Smartphone,
   Truck,
   type LucideIcon,
 } from 'lucide-react';
@@ -15,6 +17,9 @@ import { StatusBanner } from '@/components/status';
 import { Badge } from '@/components/ui/badge';
 import { CubicajePage } from '@/features/load-planning/CubicajePage';
 import { MixCheckPage } from '@/features/picking/MixCheckPage';
+import { RoutePlannerPage } from '@/features/routing/RoutePlannerPage';
+import { DriverPage } from '@/features/tracking/DriverPage';
+import { LiveMapPage } from '@/features/tracking/LiveMapPage';
 import { api, apiMode, errorMessage } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import type { CartSpec, Product } from '@/types/api';
@@ -51,8 +56,25 @@ const NAV: { group: string; items: NavItem[] }[] = [
         route: 'cubicaje',
         description: 'Peso, volumen, largo, pluma y carga por eje para elegir el vehículo.',
       },
+      {
+        label: 'Optimizar rutas',
+        icon: Route,
+        route: 'rutas',
+        description: 'Asigna pedidos a camiones y ordena las paradas para gastar menos diésel.',
+      },
+      {
+        label: 'Mapa en vivo',
+        icon: MapIcon,
+        route: 'mapa',
+        description: 'Vehículos en ruta, su trayecto y lo que llevan, en tiempo real.',
+      },
+      {
+        label: 'Modo conductor',
+        icon: Smartphone,
+        route: 'conductor',
+        description: 'Activa el GPS del teléfono del conductor durante la ruta.',
+      },
       { label: 'Restricción urbana', icon: Clock },
-      { label: 'Tracking GPS', icon: MapPin },
       { label: 'e-POD', icon: PenLine },
     ],
   },
@@ -92,6 +114,33 @@ export default function App() {
   const { catalog, error } = useCatalog();
   const current =
     NAV.flatMap((g) => g.items).find((item) => item.route === route) ?? NAV[0].items[1];
+
+  if (current.route === 'conductor') {
+    return (
+      <div className="min-h-svh">
+        <header className="flex items-center justify-between gap-3 border-b bg-card px-4 py-3">
+          <div className="flex items-center gap-2">
+            <Smartphone className="size-5" aria-hidden />
+            <div>
+              <p className="font-semibold leading-tight">Modo conductor</p>
+              <p className="text-xs text-muted-foreground">Torre de Control · Constructor Center</p>
+            </div>
+          </div>
+          <a
+            href="#mapa"
+            className="text-sm text-muted-foreground underline-offset-4 hover:underline"
+          >
+            Torre de control
+          </a>
+        </header>
+        <main className="p-4">
+          <DriverPage />
+        </main>
+      </div>
+    );
+  }
+
+  const needsCatalog = current.route === 'mezcla' || current.route === 'cubicaje';
 
   return (
     <div className="flex min-h-svh">
@@ -139,23 +188,23 @@ export default function App() {
         </header>
 
         <main className="flex-1 p-4 sm:p-6">
-          {error && (
+          {needsCatalog && error && (
             <StatusBanner status="critical" title="No se pudo cargar el catálogo">
               {error}
               {apiMode === 'http' && ' Inicie el backend con npm run dev:api en otra terminal.'}
             </StatusBanner>
           )}
-          {!catalog && !error && (
+          {needsCatalog && !catalog && !error && (
             <p className="flex items-center gap-2 text-sm text-muted-foreground">
               <LoaderCircle className="size-4 animate-spin" /> Cargando catálogo…
             </p>
           )}
-          {catalog &&
-            (current.route === 'cubicaje' ? (
-              <CubicajePage products={catalog.products} />
-            ) : (
-              <MixCheckPage products={catalog.products} cartTypes={catalog.cartTypes} />
-            ))}
+          {current.route === 'rutas' && <RoutePlannerPage />}
+          {current.route === 'mapa' && <LiveMapPage />}
+          {current.route === 'cubicaje' && catalog && <CubicajePage products={catalog.products} />}
+          {current.route === 'mezcla' && catalog && (
+            <MixCheckPage products={catalog.products} cartTypes={catalog.cartTypes} />
+          )}
         </main>
       </div>
     </div>

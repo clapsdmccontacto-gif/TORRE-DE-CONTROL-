@@ -27,6 +27,10 @@
   --status-good: #0ca30c;
   --status-warning: #fab219;
   --status-critical: #d03b3b;
+  /* Identidad de rutas en el mapa: primeras tres posiciones de la paleta categórica validada. */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -48,6 +52,9 @@
     --ring: oklch(0.56 0 0);
     --meter-track: oklch(0.3 0.004 260);
     --meter-fill: oklch(0.8 0 0);
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
     color-scheme: dark;
   }
 }
@@ -70,6 +77,9 @@
   --ring: oklch(0.56 0 0);
   --meter-track: oklch(0.3 0.004 260);
   --meter-fill: oklch(0.8 0 0);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
   color-scheme: dark;
 }
 
@@ -107,4 +117,126 @@
   body {
     @apply bg-background text-foreground antialiased;
   }
+}
+
+/* --- Mapas (Leaflet) -------------------------------------------------------- */
+/* :root delante sube la especificidad: la hoja de Leaflet se carga después que esta. */
+:root .leaflet-container {
+  background: var(--muted);
+  font: inherit;
+}
+:root .leaflet-container .leaflet-control-attribution {
+  background: color-mix(in oklch, var(--card) 85%, transparent);
+  color: var(--muted-foreground);
+}
+:root .leaflet-container .leaflet-control-attribution a {
+  color: var(--foreground);
+}
+:root .leaflet-bar a {
+  background: var(--card);
+  color: var(--foreground);
+  border-color: var(--border);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .map-tiles {
+    filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.9);
+  }
+}
+:root[data-theme="dark"] .map-tiles {
+  filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.9);
+}
+.map-icon {
+  background: none;
+  border: 0;
+}
+.route-line {
+  fill: none;
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.route-1 { stroke: var(--series-1); --route-color: var(--series-1); }
+.route-2 { stroke: var(--series-2); --route-color: var(--series-2); }
+.route-3 { stroke: var(--series-3); --route-color: var(--series-3); }
+.route-other { stroke: var(--foreground); stroke-dasharray: 8 6; --route-color: var(--foreground); }
+.route-planned {
+  stroke: var(--muted-foreground);
+  stroke-width: 3;
+  stroke-dasharray: 2 8;
+}
+.truck-marker,
+.depot-marker {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transform: translate(-7px, -7px);
+}
+.truck-dot {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border-radius: 9999px;
+  background: var(--foreground);
+  border: 2px solid var(--card);
+  box-shadow: 0 0 0 1px var(--foreground);
+}
+.truck-marker.is-selected .truck-dot {
+  width: 18px;
+  height: 18px;
+  background: var(--series-1);
+  box-shadow: 0 0 0 2px var(--series-1);
+}
+.truck-marker.is-lost .truck-dot {
+  background: var(--card);
+  border: 2px dashed var(--muted-foreground);
+  box-shadow: none;
+}
+.truck-label {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+  color: var(--foreground);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.depot-square {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  background: var(--foreground);
+  border: 2px solid var(--card);
+}
+.stop-marker {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--foreground);
+  background: var(--card);
+  border: 2px solid var(--route-color, var(--foreground));
+  border-radius: 9999px;
+}
+.stop-marker.is-done {
+  border-style: dashed;
+  color: var(--muted-foreground);
+}
+.route-swatch {
+  display: inline-block;
+  width: 18px;
+  height: 0;
+  border-top: 4px solid var(--route-color);
+  border-radius: 2px;
+}
+.route-swatch.route-other {
+  border-top-style: dashed;
 }

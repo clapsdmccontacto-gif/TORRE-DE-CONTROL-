@@ -14,7 +14,10 @@ Esta primera entrega deja la base del proyecto:
 | Regla crítica: **cubicaje** (peso, volumen, largo, pluma y carga por eje) | Hecho, con tests |
 | API REST (NestJS 12) y pantallas de ambas reglas (React 19 + Tailwind 4) | Hecho |
 | App en **un solo archivo HTML** que funciona sin servidor (celular o computador) | Hecho, generado en cada push por GitHub Actions |
-| Persistencia real, staging, restricciones, tracking, e-POD | Próximas fases (ver hoja de ruta) |
+| **Rastreo GPS**: modo conductor en el teléfono, mapa en vivo de la flota, trayecto y carga a bordo, aviso al capataz a 15 min | Hecho, con tests (incluye prueba con dos dispositivos) |
+| **Optimizador de rutas** por consumo de diésel, con ahorro frente al despacho manual | Hecho, con tests |
+| Publicación en internet (Docker + Render) con clave de acceso | Listo para activar (sección 6) |
+| Persistencia en PostgreSQL, login por roles, staging, restricciones, e-POD | Próximas fases (ver hoja de ruta) |
 
 ---
 
@@ -65,7 +68,7 @@ flowchart LR
     EPOD[epod]
   end
   W & P & C -->|REST /api/v1| API
-  TRK -.->|WebSocket| W
+  TRK -.->|SSE en vivo| W
   API --> DB[(PostgreSQL 16<br/>+ PostGIS)]
   EPOD --> S3[(Almacenamiento de objetos<br/>firmas y fotos)]
   TRK -->|outbox| N[WhatsApp / SMS<br/>al capataz]
@@ -108,12 +111,20 @@ torre-control/
 │   │       │   ├── application/  #   load-planning.service.ts · fleet-catalog.port.ts
 │   │       │   ├── infrastructure/ # default-fleet.ts · in-memory-fleet-catalog.ts
 │   │       │   └── http/
+│   │       ├── routing/          # OPTIMIZADOR DE RUTAS por consumo de diésel
+│   │       │   ├── domain/       #   delivery.ts · fuel.ts · optimizer.ts (+ specs)
+│   │       │   ├── application/  #   route-planner.ts (sin framework: lo reusa el frontend)
+│   │       │   └── infrastructure/ # demo-network.ts (bodega, obras, pedidos, patentes)
+│   │       ├── tracking/         # RASTREO GPS de conductores
+│   │       │   ├── domain/       #   tracking.ts (filtro GPS, paradas, aviso) · simulator.ts
+│   │       │   ├── application/  #   tracking-hub.ts (sesiones, eventos, flota en vivo)
+│   │       │   ├── http/         #   tracking.controller.ts (+ flujo SSE /tracking/stream)
+│   │       │   └── infrastructure/ # demo-fleet-runner.ts (camiones simulados)
 │   │       ├── staging/              (fase 2) andenes, reservas y pallets con QR
 │   │       ├── route-restrictions/   (fase 3) evaluador de la matriz urbana/rural
-│   │       ├── tracking/             (fase 3) ingesta GPS, ETA, geocercas, WebSocket
 │   │       ├── notifications/        (fase 3) outbox → WhatsApp/SMS
 │   │       └── epod/                 (fase 3) firma + foto georreferenciada
-│   └── test/api.e2e-spec.ts      # pruebas de la API completa con supertest
+│   └── test/                     # e2e con supertest (API, rastreo, SSE)
 └── frontend/                     # Vite 8 · React 19 · Tailwind 4 · componentes estilo shadcn/ui
     ├── scripts/inline-html.mjs   # empaqueta la app en dist/torre-control.html
     └── src/
@@ -121,14 +132,17 @@ torre-control/
         ├── components/
         │   ├── ui/               # button, card, badge, input (convención shadcn/ui)
         │   ├── status.tsx        # estados con ícono + texto, medidores, KPIs
-        │   └── product-lines.tsx # editor de líneas SKU + cantidad
+        │   ├── product-lines.tsx # editor de líneas SKU + cantidad
+        │   └── map/leaflet.ts    # mapa (Leaflet + OpenStreetMap), marcadores y rutas
         ├── features/
         │   ├── picking/MixCheckPage.tsx          # validador de mezcla
         │   ├── load-planning/CubicajePage.tsx    # simulador de cubicaje
+        │   ├── routing/RoutePlannerPage.tsx      # optimizar y publicar rutas
+        │   ├── tracking/LiveMapPage.tsx          # mapa en vivo de la flota
+        │   ├── tracking/DriverPage.tsx           # modo conductor (GPS del teléfono)
         │   ├── picking-monitor/                  (fase 2)
         │   ├── staging/                          (fase 2)
-        │   ├── tracking/                         (fase 3) mapa en vivo
-        │   └── epod/                             (fase 3) vista móvil del conductor
+        │   └── epod/                             (fase 3) firma y foto de la entrega
         ├── lib/
         │   ├── api.ts            # elige el modo: local (sin servidor) o HTTP (backend)
         │   ├── local-api.ts      # ejecuta en el navegador las reglas de backend/src (alias @core)
@@ -266,6 +280,7 @@ erDiagram
 | Flota y rutas | `vehicle_types`, `vehicles`, `routes` | Ficha técnica completa para el cubicaje; `routes.load_plan` guarda la decisión |
 | Última milla | `deliveries`, `delivery_proofs`, `delivery_events`, `gps_positions`, `notifications` | `notifications.dedupe_key` evita avisar dos veces al capataz cuando el GPS oscila en el umbral |
 | Restricciones | `restriction_zones`, `circulation_rules` | Polígonos + ventanas horarias (hora local, admite cruce de medianoche), límites de peso y largo |
+| Rastreo (migración 002) | `driver_sessions`, `gps_positions.session_id`, consumo en `vehicle_types`, combustible planificado en `routes` | Índice único parcial: un vehículo, una sesión activa |
 
 ### Vistas para la torre de control
 
@@ -274,6 +289,8 @@ erDiagram
 - `v_order_load_profile`: peso, volumen, largo máximo y clases por pedido (entrada del cubicaje).
 - `v_site_restriction_zones`: zonas que afectan a cada obra, por cruce espacial.
 - `v_epod_audit`: distancia entre la foto del e-POD y la obra, y si cayó dentro de la geocerca.
+- `v_live_fleet` y `v_session_tracks` (002): última posición por sesión activa y trayecto
+  recorrido como línea con su distancia.
 
 ## 5. Reglas de negocio implementadas
 
@@ -342,6 +359,46 @@ Las **restricciones de circulación** (horarios, puentes) no se mezclan aquí: e
 `route-restrictions` (fase 3) filtrará la flota permitida para la obra y la hora antes de
 llamar al cubicaje.
 
+### 5.3 Rastreo GPS y mapa en vivo
+
+- **Modo conductor** (`#conductor`, pensado para el teléfono): el conductor ingresa su nombre,
+  elige el vehículo y toca *Activar GPS e iniciar ruta*. El teléfono envía su posición cada
+  5 s; si pierde señal acumula las lecturas y las manda al recuperarla. Ve su próxima obra con
+  la hora estimada de llegada, sus paradas y lo que lleva para cada una.
+- **Filtro del GPS** (`tracking/domain/tracking.ts`): descarta lecturas con más de 100 m de
+  error, fuera de orden o con saltos imposibles (más de 150 km/h).
+- **Paradas y avisos**: con la ETA (línea recta × 1,3 a la velocidad actual o 40 km/h) se
+  registra *AVISO_PROXIMIDAD* cuando falta lo configurado para la obra (15 min, una sola vez),
+  *LLEGADA_OBRA* al entrar a 150 m y *SALIDA_OBRA* al salir (descarga terminada).
+- **Mapa en vivo** (`#mapa`): todos los vehículos en ruta con su estado (en movimiento,
+  detenido, sin señal), trayecto recorrido, paradas pendientes, carga a bordo y feed de
+  eventos. Se actualiza por Server-Sent Events, sin recargar.
+- En modo demostración (`TRACKING_DEMO`, activo por defecto) camiones simulados recorren el
+  plan publicado; un conductor real reemplaza al simulado de su vehículo.
+
+Límite importante: el navegador del teléfono **sólo envía la ubicación con la app abierta en
+pantalla** (se pide mantener la pantalla encendida). El rastreo con el teléfono bloqueado o en
+segundo plano requiere una app nativa (por ejemplo, empaquetar esta misma interfaz con
+Capacitor), prevista en la hoja de ruta.
+
+### 5.4 Optimizador de rutas por combustible
+
+`routing/domain/optimizer.ts`. Asigna los pedidos del día a los camiones y ordena las paradas
+para minimizar el diésel, con la técnica habitual de los sistemas de ruteo (TMS):
+
+1. Cada pedido pasa por el cubicaje para saber qué vehículos lo pueden llevar (fierros de
+   6 m sólo en pluma, maxisacos con pluma salvo grúa en obra, capacidad, ejes).
+2. **Construcción**: primero los pedidos más restringidos; cada uno donde menos litros agrega.
+3. **Búsqueda local** hasta que nada mejora: 2-opt (invertir tramos) y reubicar entregas entre
+   camiones. El consumo se interpola entre vacío y plena carga según lo que va a bordo en cada
+   tramo, así que conviene descargar lo pesado temprano.
+4. Se compara con el **despacho manual** (orden de nota de venta, primer camión que sirva) y se
+   informa el ahorro en litros, pesos y CO₂. Con los pedidos de ejemplo ahorra 10,5 L (13 %).
+
+Al **publicar** el plan, cada conductor ve su ruta y su carga al iniciar en modo conductor.
+Distancias estimadas en línea recta × 1,3: el siguiente paso es usar distancias reales por
+calle (motor OSRM) y ventanas horarias de las obras.
+
 ### Otros endpoints
 
 | Método | Ruta | Uso |
@@ -351,6 +408,16 @@ llamar al cubicaje.
 | GET | `/api/v1/picking/cart-types` | Capacidades por tipo de carro |
 | POST | `/api/v1/picking/cart-audit` | Revisión completa de un carro |
 | GET | `/api/v1/load-planning/vehicle-types` | Flota con carga útil, volumen y largo derivados |
+| GET | `/api/v1/routing/deliveries` | Pedidos a despachar con su carga y vehículos posibles |
+| POST | `/api/v1/routing/optimize` | Optimiza rutas (`deliveryIds`, `dieselPriceClp`) |
+| POST | `/api/v1/routing/plans/:id/publish` | Publica el plan a la flota |
+| GET | `/api/v1/routing/plans/active` | Plan publicado |
+| GET | `/api/v1/tracking/units` | Vehículos para el conductor, con sus paradas asignadas |
+| POST | `/api/v1/tracking/sessions` | Inicia la ruta de un conductor |
+| POST | `/api/v1/tracking/sessions/:id/positions` | Lote de lecturas GPS (hasta 500) |
+| POST | `/api/v1/tracking/sessions/:id/end` | Termina la ruta |
+| GET | `/api/v1/tracking/sessions/:id/track` | Trayecto recorrido y resumen |
+| GET | `/api/v1/tracking/live` · `/api/v1/tracking/stream` | Flota en vivo (foto · flujo SSE) |
 
 Errores: `400 SOLICITUD_INVALIDA` con detalle por campo (Zod) y `422` para reglas de negocio
 (`SKU_DESCONOCIDO`, `CANTIDAD_INVALIDA`, `CARGA_VACIA`).
@@ -363,7 +430,24 @@ importa el dominio desde `backend/src`):
 | Modo | Cuándo | Qué necesita |
 |---|---|---|
 | **Local** (por defecto) | Probar y usar las reglas desde cualquier dispositivo | Nada: todo se calcula en el navegador |
-| **API** | Cuando haya persistencia (fase 2): pedidos, carros y entregas reales | El backend NestJS corriendo |
+| **API** | Rastreo real entre dispositivos (teléfonos de conductores → torre de control) | El backend NestJS publicado con HTTPS |
+
+### Publicar en internet (necesario para el GPS de los conductores)
+
+El GPS del navegador exige `https://`, y para que la torre vea los teléfonos todos deben
+hablar con el mismo servidor. El repositorio trae la imagen (`torre-control/Dockerfile`: API
++ interfaz en un solo servicio) y el blueprint de Render (`render.yaml` en la raíz):
+
+1. Crear una cuenta en [render.com](https://render.com) y conectar GitHub.
+2. *New → Blueprint* → elegir este repositorio → *Apply*.
+3. Abrir la URL que entrega Render (`https://torre-control-xxxx.onrender.com`). Usuario
+   `torre`; la clave está en el servicio → *Environment* → `BASIC_AUTH_PASSWORD`.
+4. En los teléfonos de los conductores abrir `…/#conductor`; en la oficina, `…/#mapa`.
+
+Notas: el plan gratuito de Render duerme tras un rato sin uso (la primera visita tarda) y el
+estado vive en memoria hasta conectar PostgreSQL (fase 2), así que se reinicia con cada
+despliegue. Para operar sin camiones simulados: `TRACKING_DEMO=false`. Cualquier servicio que
+ejecute Docker sirve igual (Railway, Fly.io, un VPS).
 
 ### Abrir desde el celular o el computador
 
@@ -411,11 +495,16 @@ Todos están en un solo lugar y son fáciles de cambiar:
   revisar con el jefe de bodega.
 - **Capacidades de carros** (`picking/domain/cart.ts`): medir los carros reales.
 - **Coordenadas** de bodega, obras y zonas: aproximadas.
+- **Consumo de diésel por vehículo** (vacío / plena carga, L/100 km) y **precio del diésel**
+  (1.050 CLP/L por defecto, editable en pantalla): reemplazar por los rendimientos reales de
+  cada camión.
+- **Velocidad media 45 km/h y factor de recorrido 1,3**: calibrar con los trayectos que ya
+  registra el GPS (`v_session_tracks`).
 
 ## 8. Hoja de ruta
 
 | Fase | Alcance |
 |---|---|
 | **2 · Operación de bodega** | Adaptadores PostgreSQL (Kysely) para los puertos actuales; autenticación y roles; flujo de tareas de picking con escaneo persistido y autorización de supervisor (`mix_alerts`); monitor de picking; staging virtual por obra con reservas de andén y etiquetas QR |
-| **3 · Última milla** | Evaluador de la matriz de restricción (zona × día × hora × PBV × largo) que filtra la flota antes del cubicaje; ingesta GPS, ETA y geocercas con aviso al capataz a 15 min (outbox → WhatsApp/SMS); app del conductor (PWA offline) con e-POD: firma, foto georreferenciada y subida firmada a S3/MinIO |
-| **4 · Escala** | Particionado de `gps_positions` (o TimescaleDB); optimización de rutas multi-parada; contratos compartidos (OpenAPI) entre backend y frontend; integración con el ERP |
+| **3 · Última milla** | Guardar sesiones y GPS en PostgreSQL (`driver_sessions`, `gps_positions`); envío real del aviso al capataz (outbox → WhatsApp/SMS); evaluador de la matriz de restricción que filtra la flota antes de optimizar; e-POD con firma, foto georreferenciada y subida firmada a S3/MinIO; app nativa del conductor (Capacitor) para rastreo en segundo plano |
+| **4 · Escala** | Distancias reales por calle (OSRM) y ventanas horarias en el optimizador; varios viajes por camión; particionado de `gps_positions` (o TimescaleDB); contratos compartidos (OpenAPI); integración con el ERP |

@@ -3,7 +3,7 @@
 --
 -- Las coordenadas son aproximadas y las reglas de circulación son ILUSTRATIVAS:
 -- validarlas con la Dirección de Tránsito de Los Ángeles y con Vialidad antes de operar.
--- Productos y flota son los mismos que usa el backend en memoria
+-- Productos, flota, obras y pedidos son los mismos que usa el backend en memoria
 -- (backend/src/modules/*/infrastructure).
 -- =============================================================================
 
@@ -36,7 +36,22 @@ FROM (VALUES
    'Últimos 2 km de ripio'),
   ('76000002-7', 'Galpón Nacimiento', 'Sector industrial (referencial)', 'Nacimiento',
    ST_GeogFromText('POINT(-72.6700 -37.5000)'), 200, 'Capataz Demo 3', '+56900000003', true,
-   'Cuenta con grúa horquilla')
+   'Cuenta con grúa horquilla'),
+  ('76000001-9', 'Ampliación Liceo Mulchén', 'Referencial', 'Mulchén',
+   ST_GeogFromText('POINT(-72.2406 -37.7186)'), 120, 'Capataz Demo 4', '+56900000004', false, NULL),
+  ('76000002-7', 'Viviendas Laja Oriente', 'Referencial', 'Laja',
+   ST_GeogFromText('POINT(-72.7100 -37.2800)'), 120, 'Capataz Demo 5', '+56900000005', false, NULL),
+  ('76000002-7', 'Bodega agrícola Cabrero', 'Referencial', 'Cabrero',
+   ST_GeogFromText('POINT(-72.4050 -37.0350)'), 150, 'Capataz Demo 6', '+56900000006', true,
+   'Cuenta con grúa horquilla'),
+  ('76000001-9', 'Sede social Negrete', 'Referencial', 'Negrete',
+   ST_GeogFromText('POINT(-72.5300 -37.5870)'), 100, 'Capataz Demo 7', '+56900000007', false, NULL),
+  ('76000001-9', 'Condominio Sector Norte', 'Referencial', 'Los Ángeles',
+   ST_GeogFromText('POINT(-72.3300 -37.4480)'), 100, 'Capataz Demo 8', '+56900000008', false, NULL),
+  ('76000002-7', 'Casas Sector Sur', 'Referencial', 'Los Ángeles',
+   ST_GeogFromText('POINT(-72.3520 -37.4930)'), 100, 'Capataz Demo 9', '+56900000009', false, NULL),
+  ('76000001-9', 'Ampliación Colegio Poniente', 'Referencial', 'Los Ángeles',
+   ST_GeogFromText('POINT(-72.3800 -37.4650)'), 100, 'Capataz Demo 10', '+56900000010', false, NULL)
 ) AS v (rut, name, address, commune, location, radius_m, foreman, phone, equipment, notes)
 JOIN customers c ON c.rut = v.rut;
 
@@ -69,16 +84,17 @@ INSERT INTO vehicle_types (code, name, size_rank, gvwr_kg,
                            rear_axle_type, rear_axle_tare_kg, rear_axle_rating_kg,
                            wheelbase_m, cargo_start_from_front_axle_m, cargo_length_m,
                            cargo_width_m, cargo_height_m, stowage_factor, max_rear_overhang_m,
-                           crane_max_lift_kg, cost_per_km) VALUES
+                           crane_max_lift_kg, cost_per_km, fuel_empty_l_per_100km,
+                           fuel_full_l_per_100km) VALUES
   ('CAMIONETA', 'Camioneta 4x2', 1, 2910,
    'SIMPLE_RUEDA_SIMPLE', 1130, 1300, 'SIMPLE_RUEDA_SIMPLE', 790, 1850,
-   3.085, 2.30, 1.55, 1.50, 0.80, 0.85, 0.30, NULL, 450),
+   3.085, 2.30, 1.55, 1.50, 0.80, 0.85, 0.30, NULL, 450, 9.5, 12.5),
   ('CAMION_3_4', 'Camión 3/4 plataforma', 2, 6500,
    'SIMPLE_RUEDA_SIMPLE', 1650, 2600, 'SIMPLE_RUEDA_DOBLE', 1100, 4800,
-   3.36, 0.60, 4.40, 2.00, 1.80, 0.85, 1.00, NULL, 900),
+   3.36, 0.60, 4.40, 2.00, 1.80, 0.85, 1.00, NULL, 900, 15, 21),
   ('CAMION_PLUMA', 'Camión pluma', 3, 16000,
    'SIMPLE_RUEDA_SIMPLE', 4600, 6000, 'SIMPLE_RUEDA_DOBLE', 3900, 11000,
-   4.90, 1.40, 6.00, 2.45, 1.50, 0.85, 1.00, 2000, 1600);
+   4.90, 1.40, 6.00, 2.45, 1.50, 0.85, 1.00, 2000, 1600, 27, 37);
 
 INSERT INTO vehicles (plate, vehicle_type_id, home_warehouse_id, gps_device_id)
 SELECT v.plate, vt.id, w.id, v.gps
@@ -149,7 +165,14 @@ SELECT v.order_number, s.customer_id, s.id, w.id, v.status::order_status, v.prio
 FROM (VALUES
   ('NV-100231', 'Edificio Las Araucarias', 'EN_PICKING', 2),
   ('NV-100232', 'Condominio Santa Bárbara', 'RECIBIDO', 3),
-  ('NV-100233', 'Galpón Nacimiento', 'RECIBIDO', 3)
+  ('NV-100233', 'Galpón Nacimiento', 'RECIBIDO', 3),
+  ('NV-100234', 'Ampliación Liceo Mulchén', 'RECIBIDO', 3),
+  ('NV-100235', 'Viviendas Laja Oriente', 'RECIBIDO', 3),
+  ('NV-100236', 'Bodega agrícola Cabrero', 'RECIBIDO', 3),
+  ('NV-100237', 'Sede social Negrete', 'RECIBIDO', 3),
+  ('NV-100238', 'Condominio Sector Norte', 'RECIBIDO', 3),
+  ('NV-100239', 'Casas Sector Sur', 'RECIBIDO', 3),
+  ('NV-100240', 'Ampliación Colegio Poniente', 'RECIBIDO', 3)
 ) AS v (order_number, site_name, status, priority)
 JOIN sites s ON s.name = v.site_name
 JOIN warehouses w ON w.code = 'BOD-LA';
@@ -165,7 +188,21 @@ FROM (VALUES
   ('NV-100232', 1, 'FIE-A630-12', 40, 0, 'PENDIENTE', 'PATIO-FIERRO'),
   ('NV-100232', 2, 'OSB-11-1224', 20, 0, 'PENDIENTE', 'PATIO-B'),
   ('NV-100233', 1, 'ARE-MAXI-1M3', 2, 0, 'PENDIENTE', 'PATIO-ARIDOS'),
-  ('NV-100233', 2, 'DIL-SIN-5L', 5, 0, 'PENDIENTE', 'R5-A1')
+  ('NV-100233', 2, 'DIL-SIN-5L', 5, 0, 'PENDIENTE', 'R5-A1'),
+  ('NV-100234', 1, 'CEM-ESP-25', 80, 0, 'PENDIENTE', 'PATIO-A'),
+  ('NV-100234', 2, 'CLA-COR-4', 30, 0, 'PENDIENTE', 'R2-A1'),
+  ('NV-100235', 1, 'MAK-HP1630', 3, 0, 'PENDIENTE', 'BODEGA-SEGURA'),
+  ('NV-100235', 2, 'BOS-GWS700', 2, 0, 'PENDIENTE', 'BODEGA-SEGURA'),
+  ('NV-100235', 3, 'DIL-SIN-5L', 4, 0, 'PENDIENTE', 'R5-A1'),
+  ('NV-100236', 1, 'OSB-11-1224', 30, 0, 'PENDIENTE', 'PATIO-B'),
+  ('NV-100237', 1, 'CER-MUR-2540', 20, 0, 'PENDIENTE', 'R3-A2'),
+  ('NV-100237', 2, 'LAV-LOZA-50', 6, 0, 'PENDIENTE', 'R4-A1'),
+  ('NV-100238', 1, 'CEM-ESP-25', 30, 0, 'PENDIENTE', 'PATIO-A'),
+  ('NV-100238', 2, 'MAK-HP1630', 2, 0, 'PENDIENTE', 'BODEGA-SEGURA'),
+  ('NV-100239', 1, 'FIE-A630-12', 60, 0, 'PENDIENTE', 'PATIO-FIERRO'),
+  ('NV-100240', 1, 'CER-MUR-2540', 10, 0, 'PENDIENTE', 'R3-A2'),
+  ('NV-100240', 2, 'LAV-LOZA-50', 4, 0, 'PENDIENTE', 'R4-A1'),
+  ('NV-100240', 3, 'BOS-GWS700', 1, 0, 'PENDIENTE', 'BODEGA-SEGURA')
 ) AS v (order_number, line_number, sku, quantity, picked, status, location)
 JOIN orders o ON o.order_number = v.order_number
 JOIN products p ON p.sku = v.sku;
