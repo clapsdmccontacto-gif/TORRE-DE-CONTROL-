@@ -1,0 +1,18 @@
+# Blueprint de Render: publica la Torre de Control (API + interfaz) con HTTPS, necesario
+# para que el GPS funcione en los teléfonos. En Render: New → Blueprint → este repositorio.
+# La clave de acceso se genera sola: verla en el servicio → Environment → BASIC_AUTH_PASSWORD.
+services:
+  - type: web
+    name: torre-control
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: TRACKING_DEMO
+        value: "true"
+      - key: BASIC_AUTH_USER
+        value: torre
+      - key: BASIC_AUTH_PASSWORD
+        generateValue: true

@@ -1,5 +1,8 @@
 # Torre de Control Logística · Constructor Center
 
+**Abrir la app:** https://clapsdmccontacto-gif.github.io/TORRE-DE-CONTROL-/ (celular o
+computador, sin instalar nada; ver sección 6).
+
 Plataforma web que unifica y supervisa la **logística interna** de la Bodega Los Ángeles
 (WMS: picking, mezcla incompatible y staging por obra) y la **última milla** hacia las
 obras del Biobío (TMS: cubicaje, restricciones de circulación, tracking GPS y e-POD).
@@ -88,7 +91,9 @@ Cada módulo del backend sigue la misma división en capas:
 Lo marcado como *(fase N)* está diseñado pero aún no existe en el repositorio.
 
 ```
-torre-control/
+TORRE-DE-CONTROL-/
+├── .github/workflows/ci.yml      # verifica cada push y publica la app en GitHub Pages
+├── Dockerfile · render.yaml      # API + interfaz en un servicio (Render)
 ├── package.json                  # scripts de conveniencia (setup, dev, test, check)
 ├── docker-compose.yml            # PostgreSQL 16 + PostGIS 3.4 con migración y seed
 ├── .env.example
@@ -502,8 +507,8 @@ importa el dominio desde `backend/src`):
 ### Publicar en internet (necesario para el GPS de los conductores)
 
 El GPS del navegador exige `https://`, y para que la torre vea los teléfonos todos deben
-hablar con el mismo servidor. El repositorio trae la imagen (`torre-control/Dockerfile`: API
-+ interfaz en un solo servicio) y el blueprint de Render (`render.yaml` en la raíz):
+hablar con el mismo servidor. El repositorio trae la imagen (`Dockerfile`: API + interfaz en
+un solo servicio) y el blueprint de Render (`render.yaml`):
 
 1. Crear una cuenta en [render.com](https://render.com) y conectar GitHub.
 2. *New → Blueprint* → elegir este repositorio → *Apply*.
@@ -519,22 +524,23 @@ ejecute Docker sirve igual (Railway, Fly.io, un VPS).
 
 ### Abrir desde el celular o el computador
 
-- **Archivo HTML:** cada push a GitHub ejecuta el workflow *Torre de Control* y deja
-  `torre-control.html` en *Actions → (última ejecución) → Artifacts*. Se descarga y se abre
-  con doble clic o desde el gestor de archivos del teléfono; no necesita internet.
-  También se genera localmente con `npm run build:html` (queda en `frontend/dist/`).
-- **GitHub Pages (opcional):** este repositorio es privado y Pages en repositorios privados
-  requiere plan GitHub Pro o superior; además el sitio publicado queda **público**. Si se
-  decide publicarlo: *Settings → Pages → Source: GitHub Actions* y luego
-  *Settings → Secrets and variables → Actions → Variables* con `DEPLOY_PAGES = true`.
-  Desde ese momento cada push a la rama por defecto publica la app.
+- **Enlace (GitHub Pages):** https://clapsdmccontacto-gif.github.io/TORRE-DE-CONTROL-/
+  Cada push a `main` verifica todo y publica la app en la rama `gh-pages`. Activarlo **una
+  sola vez**: *Settings → Pages → Build and deployment → Source: Deploy from a branch →
+  Branch: `gh-pages` / `(root)` → Save*. A los 1–2 minutos el enlace queda funcionando.
+  Es la interfaz en modo local (todo se calcula en el navegador, con camiones de
+  demostración); el rastreo real entre teléfonos necesita el servidor (sección anterior).
+  El sitio es **público**: cualquiera con el enlace puede abrirlo.
+- **Archivo HTML:** el mismo workflow deja `torre-control.html` en *Actions → (última
+  ejecución) → Artifacts*. Se descarga y se abre con doble clic o desde el gestor de
+  archivos del teléfono. También se genera localmente con `npm run build:html` (queda en
+  `frontend/dist/`).
 
 ### Desarrollo
 
 Requisitos: Node.js 22 o superior y Docker (sólo para la base de datos).
 
 ```bash
-cd torre-control
 npm run setup          # instala backend y frontend (npm ci)
 npm run dev:web        # interfaz en http://localhost:5173, modo local
 npm run dev:api        # API en http://localhost:3000/api/v1
