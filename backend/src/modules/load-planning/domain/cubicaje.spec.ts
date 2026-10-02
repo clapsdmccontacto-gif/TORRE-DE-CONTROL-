@@ -1,6 +1,6 @@
 import { DomainError } from '../../../common/domain-error.js';
 import type { ProductLine } from '../../catalog/domain/product.js';
-import { DEMO_PRODUCTS } from '../../catalog/infrastructure/demo-products.js';
+import { DEMO_PRODUCTS } from '../../../../test/fixtures/demo-products.js';
 import { DEFAULT_FLEET } from '../infrastructure/default-fleet.js';
 import { buildLoadProfile, planLoad } from './cubicaje.js';
 

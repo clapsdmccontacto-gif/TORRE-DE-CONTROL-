@@ -5,6 +5,7 @@ import {
   LoaderCircle,
   MapPin,
   MapPinned,
+  Phone,
   Truck,
   X,
   type LucideIcon,
@@ -28,8 +29,7 @@ import {
 } from '@/components/map/leaflet';
 import { BasemapControl, TomTomKeySection } from '@/components/map/BasemapControl';
 import { StatTile, StatusBanner } from '@/components/status';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { Button, LinkButton } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { NativeSelect } from '@/components/ui/input';
 import { RoadRouteDetails } from '@/features/routing/RoadRouteDetails';
@@ -71,6 +71,7 @@ export function LiveMapPage() {
   const [snapshot, setSnapshot] = useState<FleetSnapshot | null>(null);
   const [connectionLost, setConnectionLost] = useState(false);
   const [depot, setDepot] = useState<{ name: string; location: LatLng } | null>(null);
+  const [registeredVehicles, setRegisteredVehicles] = useState<number | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [track, setTrack] = useState<{ sessionId: string; fixes: PositionFix[] } | null>(null);
 
@@ -89,8 +90,12 @@ export function LiveMapPage() {
   useEffect(() => {
     let active = true;
     api
-      .activePlan()
-      .then((plan) => active && setDepot(plan?.depot ?? null))
+      .masterData()
+      .then((data) => {
+        if (!active) return;
+        setDepot(data.depot);
+        setRegisteredVehicles(data.vehicles.length);
+      })
       .catch(() => undefined);
     return () => {
       active = false;
@@ -217,10 +222,40 @@ export function LiveMapPage() {
         </StatusBanner>
       )}
       {apiMode === 'local' && (
-        <StatusBanner status="warning" title="Demostración en este dispositivo">
-          Los camiones simulados recorren el plan publicado. Para ver los teléfonos de los
-          conductores en vivo, la app debe correr con el servidor (ver README, sección 6).
+        <StatusBanner status="warning" title="Esta versión no está conectada a un servidor">
+          Sólo ve el «Modo conductor» abierto en este mismo equipo, y sus datos quedan guardados
+          sólo aquí. Para ver en este mapa los teléfonos de los conductores, abra la app desde el
+          servidor (Render, ver README sección 6).
         </StatusBanner>
+      )}
+      {devices.length === 0 && registeredVehicles !== null && (
+        <Card className="gap-2 py-4">
+          <CardHeader className="px-4">
+            <CardTitle>Para ver un camión en el mapa</CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 text-sm text-muted-foreground">
+            <ol className="list-decimal space-y-1 pl-5">
+              <li>
+                {registeredVehicles === 0 ? (
+                  <>
+                    Agregue sus camiones en{' '}
+                    <a className="font-medium text-foreground underline" href="#flota">
+                      Flota y bodega
+                    </a>
+                    .
+                  </>
+                ) : (
+                  `Tiene ${registeredVehicles} ${registeredVehicles === 1 ? 'camión registrado' : 'camiones registrados'} en «Flota y bodega».`
+                )}
+              </li>
+              <li>
+                En el teléfono del conductor abra «Modo conductor», escriba su nombre, elija el
+                camión y toque «Activar GPS e iniciar ruta».
+              </li>
+              <li>El camión aparece aquí con su posición y se mueve en vivo.</li>
+            </ol>
+          </CardContent>
+        </Card>
       )}
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
@@ -421,7 +456,6 @@ function DeviceRow({
           {device.vehiclePlate}{' '}
           <span className="font-normal text-muted-foreground">· {device.vehicleName}</span>
         </span>
-        {device.simulated && <Badge variant="secondary">Simulado</Badge>}
       </span>
       <span className="text-muted-foreground">{device.driverName}</span>
       <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -461,6 +495,16 @@ function DeviceDetail({ device, trackFixes }: { device: LiveDevice; trackFixes: 
         </CardDescription>
       </CardHeader>
       <CardContent className="grid grid-cols-1 gap-4 px-4 text-sm">
+        {device.driverPhone && (
+          <LinkButton
+            href={`tel:${device.driverPhone.replace(/[\s-]/g, '')}`}
+            variant="outline"
+            size="sm"
+            className="justify-self-start"
+          >
+            <Phone /> Llamar a {device.driverName} ({device.driverPhone})
+          </LinkButton>
+        )}
         <div className="grid gap-1">
           <p className="font-medium">A bordo ({formatKg(device.cargoWeightKg)})</p>
           {device.cargo.length === 0 ? (

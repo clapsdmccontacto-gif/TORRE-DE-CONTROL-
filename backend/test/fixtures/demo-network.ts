@@ -1,13 +1,13 @@
-import type { LatLng } from '../../../common/geo.js';
-import type { ProductLine } from '../../catalog/domain/product.js';
-import { DEMO_PRODUCTS } from '../../catalog/infrastructure/demo-products.js';
-import { DEFAULT_FLEET } from '../../load-planning/infrastructure/default-fleet.js';
-import type { DeliveryOrder, DeliverySite } from '../domain/delivery.js';
-import type { FleetUnit } from '../domain/optimizer.js';
+import type { LatLng } from '../../src/common/geo.js';
+import type { ProductLine } from '../../src/modules/catalog/domain/product.js';
+import { DEFAULT_FLEET } from '../../src/modules/load-planning/infrastructure/default-fleet.js';
+import type { DeliveryOrder, DeliverySite } from '../../src/modules/routing/domain/delivery.js';
+import type { FleetUnit } from '../../src/modules/routing/domain/optimizer.js';
+import { DEMO_PRODUCTS } from './demo-products.js';
 
 /**
- * Red de demostración (mismo contenido que database/seeds/001_demo_data.sql).
- * Coordenadas aproximadas; obras y pedidos ficticios.
+ * Red de prueba: sólo la usan los tests (la app parte vacía; bodega, obras, pedidos y
+ * camiones se cargan en la interfaz). Coordenadas aproximadas; obras y pedidos ficticios.
  */
 export const DEMO_DEPOT: { name: string; location: LatLng } = {
   name: 'Bodega Los Ángeles',
@@ -113,7 +113,7 @@ export const DEMO_ORDERS: readonly DeliveryOrder[] = ORDERS.map(([id, siteId, li
   })),
 }));
 
-/** Vehículos físicos (tabla `vehicles` del seed). */
+/** Vehículos de prueba. */
 export const DEMO_UNITS: readonly FleetUnit[] = (
   [
     ['DEMO-01', 'CAMIONETA'],

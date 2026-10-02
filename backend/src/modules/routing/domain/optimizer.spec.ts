@@ -1,13 +1,13 @@
 import { maxPayloadKg } from '../../load-planning/domain/vehicle.js';
 import { DEFAULT_FLEET } from '../../load-planning/infrastructure/default-fleet.js';
-import { DEMO_DEPOT, DEMO_ORDERS, DEMO_UNITS } from '../infrastructure/demo-network.js';
+import { DEMO_DEPOT, DEMO_ORDERS, DEMO_UNITS } from '../../../../test/fixtures/demo-network.js';
 import { toDeliveryRequest, type DeliveryRequest } from './delivery.js';
 import { DEFAULT_ROUTING_OPTIONS, optimizeRoutes, type RoutingOptions } from './optimizer.js';
 
 const options: RoutingOptions = { ...DEFAULT_ROUTING_OPTIONS, depot: DEMO_DEPOT.location };
 const requests = DEMO_ORDERS.map((o) => toDeliveryRequest(o, DEFAULT_FLEET));
 
-describe('optimizeRoutes con la red de demostración', () => {
+describe('optimizeRoutes con la red de prueba', () => {
   const result = optimizeRoutes(requests, DEMO_UNITS, options);
 
   it('asigna todas las entregas respetando vehículo permitido y capacidad', () => {

@@ -1,9 +1,9 @@
 import type { VehicleType } from '../domain/vehicle.js';
 
 /**
- * Flota de referencia (mismo contenido que database/seeds/001_demo_data.sql).
- * Las especificaciones son representativas de cada segmento; reemplazarlas por las
- * fichas técnicas de los vehículos reales de Constructor Center.
+ * Tipos de vehículo (no camiones de prueba: las patentes las carga la empresa en «Flota y
+ * bodega»). Las especificaciones son representativas de cada segmento; reemplazarlas por
+ * las fichas técnicas de los vehículos reales de Constructor Center.
  */
 export const DEFAULT_FLEET: readonly VehicleType[] = [
   {

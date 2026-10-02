@@ -3,6 +3,12 @@
 
 import type { DeliveryView, RoutePlan } from '@core/modules/routing/application/route-planner';
 import type { RoadAdjustment } from '@core/modules/routing/domain/road-adjustment';
+import type { MasterDataView, SiteInput } from '@core/modules/master-data/application/master-data';
+import type {
+  Depot,
+  OrderRecord,
+  VehicleRecord,
+} from '@core/modules/master-data/domain/master-data';
 import type { PositionFix } from '@core/modules/tracking/domain/tracking';
 import type {
   DriverSession,
@@ -151,6 +157,15 @@ export type {
   TrackingEvent,
 } from '@core/modules/tracking/application/tracking-hub';
 
+export type { MasterDataView, SiteInput } from '@core/modules/master-data/application/master-data';
+export type {
+  Depot,
+  OrderLineRecord,
+  OrderRecord,
+  VehicleRecord,
+} from '@core/modules/master-data/domain/master-data';
+export type { DeliverySite } from '@core/modules/routing/domain/delivery';
+
 export interface FleetUnitView {
   plate: string;
   vehicleName: string;
@@ -165,6 +180,18 @@ export interface TrackResponse {
 
 /** Operaciones que usa la interfaz; las implementa el backend (HTTP) o el motor local. */
 export interface TorreApi {
+  // Datos que carga la empresa (la app parte vacía).
+  masterData(): Promise<MasterDataView>;
+  saveDepot(depot: Depot): Promise<MasterDataView>;
+  saveVehicle(vehicle: VehicleRecord): Promise<MasterDataView>;
+  removeVehicle(plate: string): Promise<MasterDataView>;
+  saveProduct(product: Omit<Product, 'unitVolumeM3'>): Promise<MasterDataView>;
+  removeProduct(sku: string): Promise<MasterDataView>;
+  saveSite(site: SiteInput): Promise<MasterDataView>;
+  removeSite(id: string): Promise<MasterDataView>;
+  saveOrder(order: OrderRecord): Promise<MasterDataView>;
+  removeOrder(id: string): Promise<MasterDataView>;
+
   products(): Promise<Product[]>;
   cartTypes(): Promise<CartSpec[]>;
   mixCheck(request: MixCheckRequest): Promise<MixCheckResponse>;
@@ -182,7 +209,11 @@ export interface TorreApi {
   activePlan(): Promise<RoutePlan | null>;
 
   fleetUnits(): Promise<FleetUnitView[]>;
-  startDriverSession(input: { driverName: string; vehiclePlate: string }): Promise<DriverSession>;
+  startDriverSession(input: {
+    driverName: string;
+    driverPhone?: string | null;
+    vehiclePlate: string;
+  }): Promise<DriverSession>;
   sendPositions(sessionId: string, fixes: PositionFix[]): Promise<IngestResult>;
   endDriverSession(sessionId: string): Promise<DriverSession>;
   deviceTrack(sessionId: string): Promise<TrackResponse>;

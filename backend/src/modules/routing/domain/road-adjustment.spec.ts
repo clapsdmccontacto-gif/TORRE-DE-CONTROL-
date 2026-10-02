@@ -1,5 +1,5 @@
 import { DEFAULT_FLEET } from '../../load-planning/infrastructure/default-fleet.js';
-import { DEMO_DEPOT, DEMO_ORDERS, DEMO_UNITS } from '../infrastructure/demo-network.js';
+import { DEMO_DEPOT, DEMO_ORDERS, DEMO_UNITS } from '../../../../test/fixtures/demo-network.js';
 import { toDeliveryRequest } from './delivery.js';
 import { DEFAULT_ROUTING_OPTIONS, optimizeRoutes, planTotals } from './optimizer.js';
 import { applyRoadAdjustment, type RoadAdjustment } from './road-adjustment.js';

@@ -31,8 +31,23 @@ function httpApi(baseUrl: string): TorreApi {
 
   const post = <T>(path: string, payload: unknown) =>
     request<T>(path, { method: 'POST', body: JSON.stringify(payload) });
+  const put = <T>(path: string, payload: unknown) =>
+    request<T>(path, { method: 'PUT', body: JSON.stringify(payload) });
+  const remove = <T>(path: string) => request<T>(path, { method: 'DELETE' });
+  const id = encodeURIComponent;
 
   return {
+    masterData: () => request('/master-data'),
+    saveDepot: (depot) => put('/master-data/depot', depot),
+    saveVehicle: (vehicle) => post('/master-data/vehicles', vehicle),
+    removeVehicle: (plate) => remove(`/master-data/vehicles/${id(plate)}`),
+    saveProduct: (product) => post('/master-data/products', product),
+    removeProduct: (sku) => remove(`/master-data/products/${id(sku)}`),
+    saveSite: (site) => post('/master-data/sites', site),
+    removeSite: (siteId) => remove(`/master-data/sites/${id(siteId)}`),
+    saveOrder: (order) => post('/master-data/orders', order),
+    removeOrder: (orderId) => remove(`/master-data/orders/${id(orderId)}`),
+
     products: () => request('/catalog/products'),
     cartTypes: () => request('/picking/cart-types'),
     mixCheck: (payload) => post('/picking/mix-check', payload),

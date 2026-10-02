@@ -1,21 +1,22 @@
 import { Module } from '@nestjs/common';
 import { DEFAULT_FLEET } from '../load-planning/infrastructure/default-fleet.js';
+import { MasterData } from '../master-data/application/master-data.js';
 import { RoutePlanner } from './application/route-planner.js';
 import { RoutingController } from './http/routing.controller.js';
-import { DEMO_DEPOT, DEMO_ORDERS, DEMO_UNITS } from './infrastructure/demo-network.js';
 
 @Module({
   controllers: [RoutingController],
   providers: [
     {
       provide: RoutePlanner,
-      useFactory: () =>
+      useFactory: (data: MasterData) =>
         new RoutePlanner({
-          depot: DEMO_DEPOT,
-          orders: () => DEMO_ORDERS,
+          depot: () => data.depot(),
+          orders: () => data.orders(),
           fleet: DEFAULT_FLEET,
-          units: DEMO_UNITS,
+          units: () => data.units(),
         }),
+      inject: [MasterData],
     },
   ],
   exports: [RoutePlanner],

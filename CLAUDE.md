@@ -23,15 +23,16 @@ secretos (la única clave es la de TomTom de la empresa, ver abajo).
   (`src/lib/road-routing.ts`), no a través de `TorreApi`; sólo el resultado aplicado al plan
   pasa por la API. La única clave en el repositorio es la de TomTom de la empresa
   (`COMPANY_TOMTOM_KEY` en `routing/infrastructure/tomtom.ts`, clave de navegador incluida
-  a pedido del dueño; la reemplazan `VITE_TOMTOM_KEY` al compilar la interfaz y
-  `TOMTOM_API_KEY` en el servidor, vacías la quitan). Ningún otro secreto en el repositorio.
-- Demostración: el plan de ejemplo se publica por calles (`optimizeWithStreets`) y los
-  camiones simulados siguen el trazado por tramos (`tripLegs`); los e2e corren con
-  `TOMTOM_API_KEY=''` para no llamar a TomTom.
+  a pedido del dueño; `VITE_TOMTOM_KEY` la reemplaza al compilar y vacía la quita).
+  Ningún otro secreto en el repositorio.
+- Sin datos de muestra ni simulación: la app parte vacía y la empresa carga bodega,
+  camiones, productos, obras y pedidos (módulo `master-data`, un documento JSON en
+  PostgreSQL `app_state` vía `DATABASE_URL`, o en memoria; en modo local, localStorage).
+  Los datos de prueba viven sólo en `backend/test/fixtures/` (specs y e2e los cargan por
+  la API con `test/seed.ts`); nunca importarlos desde código de la app.
 - Identificadores en inglés; valores de negocio (estados, clases) y textos de UI en español (es-CL).
-- Base de datos: cambios como migraciones nuevas `database/migrations/00N_*.sql`. Mantener
-  `demo-products.ts`, `default-fleet.ts` y `demo-network.ts` sincronizados con
-  `database/seeds/001_demo_data.sql`.
+- Base de datos: cambios como migraciones nuevas `database/migrations/00N_*.sql`.
+  `default-fleet.ts` son los tipos de vehículo (no camiones de prueba).
 - UI: componentes estilo shadcn/ui en `frontend/src/components/ui`; colores sólo vía los
   tokens de `src/index.css` (tema claro y oscuro); los estados good/warning/critical van
   siempre con ícono + texto.
@@ -48,8 +49,8 @@ secretos (la única clave es la de TomTom de la empresa, ver abajo).
 - App en internet: cada push a `main` publica la interfaz en GitHub Pages (rama `gh-pages`,
   workflow `.github/workflows/ci.yml`): https://clapsdmccontacto-gif.github.io/TORRE-DE-CONTROL-/
 - `Dockerfile` (API + interfaz en modo API en un servicio) y `render.yaml` para Render.
-- Variables: `PORT`, `TRACKING_DEMO` (`false` = sin camiones simulados), `TOMTOM_API_KEY`
-  (opcional: otra clave para el plan de demostración del servidor),
+- Variables: `PORT`, `DATABASE_URL` (PostgreSQL de los datos de la empresa; sin ella, en
+  memoria),
   `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` (clave de acceso a toda la app), `STATIC_DIR`.
 - Mapa base: selector en la app (`frontend/src/components/map/basemaps.ts`): TomTom con
   tráfico por defecto (clave de la empresa incluida), Esri sin clave, MapTiler con clave, o

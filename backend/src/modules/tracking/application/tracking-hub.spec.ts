@@ -1,17 +1,18 @@
 import { DomainError } from '../../../common/domain-error.js';
 import { DEFAULT_FLEET } from '../../load-planning/infrastructure/default-fleet.js';
 import { RoutePlanner } from '../../routing/application/route-planner.js';
-import { DEMO_DEPOT, DEMO_ORDERS, DEMO_UNITS } from '../../routing/infrastructure/demo-network.js';
+import { DEMO_DEPOT, DEMO_ORDERS, DEMO_UNITS } from '../../../../test/fixtures/demo-network.js';
 import type { PositionFix } from '../domain/tracking.js';
 import { TrackingHub } from './tracking-hub.js';
 
 function setup() {
   let now = Date.parse('2026-10-02T12:00:00Z');
+  let units = [...DEMO_UNITS];
   const planner = new RoutePlanner({
-    depot: DEMO_DEPOT,
+    depot: () => DEMO_DEPOT,
     orders: () => DEMO_ORDERS,
     fleet: DEFAULT_FLEET,
-    units: DEMO_UNITS,
+    units: () => units,
     now: () => now,
   });
   const plan = planner.optimize({
@@ -20,13 +21,14 @@ function setup() {
   });
   planner.publish(plan.id);
   const hub = new TrackingHub({
-    units: DEMO_UNITS,
+    units: () => units,
     activePlan: () => planner.activePlan(),
     now: () => now,
   });
   return {
     hub,
     plan,
+    setUnits: (next: typeof units) => (units = next),
     advance: (ms: number) => (now += ms),
     at: (offsetSec: number) => new Date(now + offsetSec * 1000).toISOString(),
   };
@@ -61,7 +63,6 @@ describe('TrackingHub', () => {
     const device = hub.snapshot().devices.find((d) => d.sessionId === session.id)!;
     expect(device).toMatchObject({
       driverName: 'Juan Pérez',
-      simulated: false,
       status: 'DETENIDO',
     });
     expect(device.stops[0].state).toBe('EN_OBRA');
@@ -101,31 +102,52 @@ describe('TrackingHub', () => {
     );
   });
 
-  it('simula un camión por ruta del plan y los hace avanzar', () => {
-    const { hub, plan, advance } = setup();
-    const updates: number[] = [];
-    hub.subscribe((s) => updates.push(s.devices.length));
-
-    hub.startSimulation(plan);
-    const before = hub.snapshot().devices;
-    expect(before).toHaveLength(plan.routes.length);
-    expect(before.every((d) => d.simulated && d.position !== null)).toBe(true);
-
-    advance(60_000);
-    hub.tick();
-    const after = hub.snapshot().devices;
-    const moved = after.filter((d, i) => d.position!.recordedAt !== before[i].position!.recordedAt);
-    expect(moved.length).toBe(plan.routes.length);
-    expect(updates.at(-1)).toBe(plan.routes.length);
+  it('guarda el teléfono del conductor y lo muestra en la flota en vivo', () => {
+    const { hub } = setup();
+    const session = hub.startSession({
+      driverName: '  Pedro   Muñoz ',
+      driverPhone: '+56 9 1234 5678',
+      vehiclePlate: 'DEMO-02',
+    });
+    expect(session.driverName).toBe('Pedro Muñoz');
+    expect(hub.snapshot().devices[0]).toMatchObject({
+      driverPhone: '+56 9 1234 5678',
+      vehiclePlate: 'DEMO-02',
+    });
+    expect(() =>
+      hub.startSession({ driverName: 'Ana', driverPhone: 'llámame', vehiclePlate: 'DEMO-01' }),
+    ).toThrow(expect.objectContaining({ code: 'TELEFONO_INVALIDO' }));
   });
 
-  it('un conductor real desplaza al camión simulado de su vehículo', () => {
-    const { hub, plan } = setup();
-    hub.startSimulation(plan);
-    const plate = plan.routes[0].unitPlate;
-    hub.startSession({ driverName: 'Pedro Muñoz', vehiclePlate: plate });
-    const devices = hub.snapshot().devices.filter((d) => d.vehiclePlate === plate);
-    expect(devices).toHaveLength(1);
-    expect(devices[0].simulated).toBe(false);
+  it('sólo acepta camiones registrados, también los agregados después', () => {
+    const { hub, setUnits } = setup();
+    expect(() => hub.startSession({ driverName: 'Ana', vehiclePlate: 'ABCD12' })).toThrow(
+      expect.objectContaining({ code: 'VEHICULO_DESCONOCIDO' }),
+    );
+    setUnits([...DEMO_UNITS, { plate: 'ABCD12', vehicle: DEFAULT_FLEET[1] }]);
+    expect(hub.startSession({ driverName: 'Ana', vehiclePlate: 'ABCD12' }).stops).toEqual([]);
+  });
+
+  it('distingue una ruta terminada de una que el servidor ya no conoce (reinicio)', () => {
+    const { hub, at } = setup();
+    const session = hub.startSession({ driverName: 'Ana', vehiclePlate: 'DEMO-01' });
+    hub.endSession(session.id);
+    expect(() => hub.ingest(session.id, [fixAt(-37.46, -72.34, at(1))])).toThrow(
+      expect.objectContaining({ code: 'SESION_NO_ACTIVA' }),
+    );
+    expect(() => hub.ingest('RUTA-perdida', [fixAt(-37.46, -72.34, at(1))])).toThrow(
+      expect.objectContaining({ code: 'SESION_DESCONOCIDA' }),
+    );
+  });
+
+  it('refresh avisa la foto sólo si hay rutas activas', () => {
+    const { hub } = setup();
+    const snapshots: number[] = [];
+    hub.subscribe((s) => snapshots.push(s.devices.length));
+    hub.refresh();
+    expect(snapshots).toEqual([]);
+    hub.startSession({ driverName: 'Ana', vehiclePlate: 'DEMO-01' });
+    hub.refresh();
+    expect(snapshots).toEqual([1, 1]);
   });
 });

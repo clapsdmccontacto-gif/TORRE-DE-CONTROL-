@@ -1,95 +1,81 @@
 // Motor local: ejecuta en el navegador las mismas reglas de dominio del backend
-// (importadas desde backend/src con el alias @core). Así la app funciona sin
-// servidor: como archivo HTML, publicada en la web o en el teléfono.
+// (importadas desde backend/src con el alias @core). Así la app funciona sin servidor;
+// los datos quedan guardados sólo en este dispositivo (localStorage).
 import { DomainError } from '@core/common/domain-error';
 import { resolveLines } from '@core/modules/catalog/application/resolve-lines';
 import { unitVolumeM3 } from '@core/modules/catalog/domain/product';
-import { DEMO_PRODUCTS } from '@core/modules/catalog/infrastructure/demo-products';
-import { planLoad } from '@core/modules/load-planning/domain/cubicaje';
+import { maxPayloadKg } from '@core/modules/load-planning/domain/vehicle';
 import { DEFAULT_FLEET } from '@core/modules/load-planning/infrastructure/default-fleet';
+import { MasterData } from '@core/modules/master-data/application/master-data';
+import type { StateStore } from '@core/modules/master-data/application/state-store.port';
 import { DEFAULT_CART_SPECS } from '@core/modules/picking/domain/cart';
 import { checkCartAddition } from '@core/modules/picking/domain/mix-validator';
-import { optimizeWithStreets } from '@core/modules/routing/application/road-refinement';
+import { planLoad } from '@core/modules/load-planning/domain/cubicaje';
 import { RoutePlanner } from '@core/modules/routing/application/route-planner';
-import {
-  DEMO_DEPOT,
-  DEMO_ORDERS,
-  DEMO_UNITS,
-} from '@core/modules/routing/infrastructure/demo-network';
-import { TomTomRoadRouter } from '@core/modules/routing/infrastructure/tomtom';
 import { TrackingHub } from '@core/modules/tracking/application/tracking-hub';
-import { tomtomKey } from '@/components/map/basemaps';
 import { ApiError } from '@/lib/api-error';
-import { CachedRoadRouter } from '@/lib/road-cache';
 import type { TorreApi } from '@/types/api';
 
-const catalog = {
-  list: async () => [...DEMO_PRODUCTS],
-  findBySkus: async (skus: readonly string[]) =>
-    DEMO_PRODUCTS.filter((product) => skus.includes(product.sku)),
+const STORAGE_KEY = 'torre-control.master-data';
+
+/** Datos maestros en el navegador. */
+const localStore: StateStore = {
+  load: async () => {
+    try {
+      return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') as unknown;
+    } catch {
+      return null;
+    }
+  },
+  save: async (snapshot) => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+    } catch {
+      throw new DomainError(
+        'SIN_ALMACENAMIENTO',
+        'El navegador no permite guardar datos (modo privado o almacenamiento lleno).',
+      );
+    }
+  },
 };
 
-/**
- * Planificador y rastreo en memoria del navegador, en modo demostración: el plan del día
- * queda publicado y camiones simulados lo recorren. Un teléfono en "Modo conductor" en
- * esta misma pestaña también aparece en el mapa; entre dispositivos distintos hace falta
- * el backend (modo API).
- */
-let fleetEngine: { planner: RoutePlanner; hub: TrackingHub; ready: Promise<void> } | null = null;
+let localEngine: { data: MasterData; planner: RoutePlanner; hub: TrackingHub } | null = null;
 
 function engine() {
-  if (fleetEngine) return fleetEngine;
+  if (localEngine) return localEngine;
+  const data = new MasterData({ store: localStore, vehicleTypes: DEFAULT_FLEET, maxPayloadKg });
   const planner = new RoutePlanner({
-    depot: DEMO_DEPOT,
-    orders: () => DEMO_ORDERS,
+    depot: () => data.depot(),
+    orders: () => data.orders(),
     fleet: DEFAULT_FLEET,
-    units: DEMO_UNITS,
+    units: () => data.units(),
   });
-  const hub = new TrackingHub({ units: DEMO_UNITS, activePlan: () => planner.activePlan() });
-  planner.onPublish((plan) => hub.startSimulation(plan));
-  fleetEngine = { planner, hub, ready: publishDemoPlan(planner) };
-  return fleetEngine;
+  const hub = new TrackingHub({
+    units: () => planner.units(),
+    activePlan: () => planner.activePlan(),
+  });
+  localEngine = { data, planner, hub };
+  return localEngine;
 }
 
-/** Motor con el plan de demostración ya publicado. */
-async function fleet() {
+/** Motor con los datos guardados ya cargados. */
+async function ready() {
   const current = engine();
-  await current.ready;
+  await current.data.ready;
   return current;
 }
 
-const DEMO_INPUT = { deliveryIds: DEMO_ORDERS.map((o) => o.id), dieselPriceClp: 1_050 };
-/** Máximo de espera por las calles de TomTom antes de publicar con rutas estimadas. */
-const STREETS_TIMEOUT_MS = 8_000;
+const catalog = {
+  list: async () => [...(await ready()).data.products()],
+  findBySkus: async (skus: readonly string[]) => {
+    const products = (await ready()).data.products();
+    return skus.flatMap((sku) => products.find((p) => p.sku === sku.trim().toUpperCase()) ?? []);
+  },
+};
 
-/**
- * Publica el plan de demostración por calles reales (TomTom, guardado 3 h en el equipo)
- * para que los camiones simulados sigan las calles. Sin clave, sin conexión o si TomTom
- * tarda, se publica con las rutas estimadas.
- */
-async function publishDemoPlan(planner: RoutePlanner): Promise<void> {
-  const key = tomtomKey();
-  if (key) {
-    try {
-      const streets = optimizeWithStreets(
-        planner,
-        DEMO_INPUT,
-        new CachedRoadRouter(new TomTomRoadRouter(key)),
-      );
-      const timeout = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('TomTom no respondió a tiempo')), STREETS_TIMEOUT_MS),
-      );
-      planner.publish((await Promise.race([streets, timeout])).id);
-      return;
-    } catch {
-      // Se publica con las rutas estimadas.
-    }
-  }
-  planner.publish(planner.optimize(DEMO_INPUT).id);
-}
-
-const TICK_MS = 2_000;
-let tickTimer: ReturnType<typeof setInterval> | null = null;
+/** Cada cuánto se revisa quién dejó de reportar ("sin señal"). */
+const REFRESH_MS = 5_000;
+let refreshTimer: ReturnType<typeof setInterval> | null = null;
 let subscribers = 0;
 
 /** Traduce los errores de dominio al mismo formato que responde la API (422). */
@@ -105,7 +91,19 @@ async function run<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 export const localApi: TorreApi = {
-  products: async () => DEMO_PRODUCTS.map((p) => ({ ...p, unitVolumeM3: unitVolumeM3(p) })),
+  masterData: async () => (await ready()).data.view(),
+  saveDepot: (depot) => run(async () => (await ready()).data.saveDepot(depot)),
+  saveVehicle: (vehicle) => run(async () => (await ready()).data.saveVehicle(vehicle)),
+  removeVehicle: (plate) => run(async () => (await ready()).data.removeVehicle(plate)),
+  saveProduct: (product) => run(async () => (await ready()).data.saveProduct(product)),
+  removeProduct: (sku) => run(async () => (await ready()).data.removeProduct(sku)),
+  saveSite: (site) => run(async () => (await ready()).data.saveSite(site)),
+  removeSite: (id) => run(async () => (await ready()).data.removeSite(id)),
+  saveOrder: (order) => run(async () => (await ready()).data.saveOrder(order)),
+  removeOrder: (id) => run(async () => (await ready()).data.removeOrder(id)),
+
+  products: async () =>
+    (await ready()).data.products().map((p) => ({ ...p, unitVolumeM3: unitVolumeM3(p) })),
   cartTypes: async () => Object.values(DEFAULT_CART_SPECS),
   mixCheck: (request) =>
     run(async () => {
@@ -124,41 +122,31 @@ export const localApi: TorreApi = {
       }),
     ),
 
-  deliveries: async () => engine().planner.deliveries(),
-  optimizeRoutes: (request) => run(async () => engine().planner.optimize(request)),
+  deliveries: async () => (await ready()).planner.deliveries(),
+  optimizeRoutes: (request) => run(async () => (await ready()).planner.optimize(request)),
   applyRoadAdjustment: (planId, unitPlate, adjustment) =>
-    run(async () => engine().planner.applyRoadAdjustment(planId, unitPlate, adjustment)),
-  publishPlan: (planId) => run(async () => (await fleet()).planner.publish(planId)),
-  activePlan: async () => (await fleet()).planner.activePlan(),
+    run(async () => (await ready()).planner.applyRoadAdjustment(planId, unitPlate, adjustment)),
+  publishPlan: (planId) => run(async () => (await ready()).planner.publish(planId)),
+  activePlan: async () => (await ready()).planner.activePlan(),
 
-  fleetUnits: async () => (await fleet()).planner.fleetUnits(),
-  startDriverSession: (input) => run(async () => (await fleet()).hub.startSession(input)),
+  fleetUnits: async () => (await ready()).planner.fleetUnits(),
+  startDriverSession: (input) => run(async () => (await ready()).hub.startSession(input)),
   sendPositions: (sessionId, fixes) => run(async () => engine().hub.ingest(sessionId, fixes)),
   endDriverSession: (sessionId) => run(async () => engine().hub.endSession(sessionId)),
   deviceTrack: (sessionId) => run(async () => engine().hub.track(sessionId)),
-  liveFleet: async () => {
-    const { hub } = await fleet();
-    hub.tick();
-    return hub.snapshot();
-  },
+  liveFleet: async () => (await ready()).hub.snapshot(),
   subscribeFleet: (onSnapshot) => {
-    const { hub, ready } = engine();
-    let active = true;
+    const { hub } = engine();
     const unsubscribe = hub.subscribe(onSnapshot);
     subscribers++;
-    tickTimer ??= setInterval(() => hub.tick(), TICK_MS);
-    void ready.then(() => {
-      if (!active) return;
-      hub.tick();
-      onSnapshot(hub.snapshot());
-    });
+    refreshTimer ??= setInterval(() => hub.refresh(), REFRESH_MS);
+    onSnapshot(hub.snapshot());
     return () => {
-      active = false;
       unsubscribe();
       subscribers--;
-      if (subscribers === 0 && tickTimer) {
-        clearInterval(tickTimer);
-        tickTimer = null;
+      if (subscribers === 0 && refreshTimer) {
+        clearInterval(refreshTimer);
+        refreshTimer = null;
       }
     };
   },

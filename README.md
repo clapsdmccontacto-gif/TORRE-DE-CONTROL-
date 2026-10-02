@@ -1,7 +1,13 @@
 # Torre de Control Logística · Constructor Center
 
 **Abrir la app:** https://clapsdmccontacto-gif.github.io/TORRE-DE-CONTROL-/ (celular o
-computador, sin instalar nada; ver sección 6).
+computador, sin instalar nada). Esa versión no tiene servidor: guarda los datos sólo en el
+equipo donde se abre. Para el **rastreo real** (teléfonos de conductores → mapa de la torre)
+se usa la app publicada con el servidor en Render (sección 6).
+
+La app **parte vacía**: no trae camiones, obras, pedidos ni productos de muestra, ni
+camiones simulados. Se cargan en *Flota y bodega*, *Productos* y *Obras y pedidos*
+(sección 5.6).
 
 Plataforma web que unifica y supervisa la **logística interna** de la Bodega Los Ángeles
 (WMS: picking, mezcla incompatible y staging por obra) y la **última milla** hacia las
@@ -12,15 +18,16 @@ Esta primera entrega deja la base del proyecto:
 | Entregable | Estado |
 |---|---|
 | Estructura de directorios backend + frontend | Hecho |
-| Esquema PostgreSQL + PostGIS (24 tablas, 4 vistas) con datos de demostración | Hecho y validado sobre PostgreSQL 16.14 + PostGIS 3.4.2 |
+| Esquema PostgreSQL + PostGIS (24 tablas, 4 vistas) | Hecho y validado sobre PostgreSQL 16.14 + PostGIS 3.4.2 |
 | Regla crítica: **validación de mezcla incompatible** en el carro de picking | Hecho, con tests |
 | Regla crítica: **cubicaje** (peso, volumen, largo, pluma y carga por eje) | Hecho, con tests |
 | API REST (NestJS 12) y pantallas de ambas reglas (React 19 + Tailwind 4) | Hecho |
 | App en **un solo archivo HTML** que funciona sin servidor (celular o computador) | Hecho, generado en cada push por GitHub Actions |
 | **Rastreo GPS**: modo conductor en el teléfono, mapa en vivo de la flota, trayecto y carga a bordo, aviso al capataz a 15 min | Hecho, con tests (incluye prueba con dos dispositivos) |
 | **Optimizador de rutas** por consumo de diésel, con ahorro frente al despacho manual | Hecho, con tests |
-| Publicación en internet (Docker + Render) con clave de acceso | Listo para activar (sección 6) |
-| Persistencia en PostgreSQL, login por roles, staging, restricciones, e-POD | Próximas fases (ver hoja de ruta) |
+| **Datos de la empresa** (camiones, bodega, productos, obras, pedidos) guardados en PostgreSQL | Hecho, con tests (incluye PostgreSQL real) |
+| Publicación en internet (Docker + Render + PostgreSQL gratis) con clave de acceso | Listo para activar (sección 6) |
+| Recorridos GPS en PostgreSQL, login por roles, staging, restricciones, e-POD | Próximas fases (ver hoja de ruta) |
 
 ---
 
@@ -95,20 +102,25 @@ TORRE-DE-CONTROL-/
 ├── .github/workflows/ci.yml      # verifica cada push y publica la app en GitHub Pages
 ├── Dockerfile · render.yaml      # API + interfaz en un servicio (Render)
 ├── package.json                  # scripts de conveniencia (setup, dev, test, check)
-├── docker-compose.yml            # PostgreSQL 16 + PostGIS 3.4 con migración y seed
+├── docker-compose.yml            # PostgreSQL 16 + PostGIS 3.4 con las migraciones
 ├── .env.example
 ├── database/
 │   ├── migrations/001_init.sql   # esquema completo (WMS + TMS + geodatos + vistas)
 │   ├── migrations/002_tracking_routing.sql # GPS de conductores y consumo de diésel
 │   ├── migrations/003_road_routing.sql     # rutas ajustadas por calles (tráfico, peajes)
-│   └── seeds/001_demo_data.sql   # bodega, obras, catálogo, flota, zonas, pedidos de ejemplo
+│   └── migrations/004_app_state.sql        # datos que carga la empresa (JSON en app_state)
 ├── backend/                      # NestJS 12 · TypeScript · ESM · Vitest · Zod
 │   ├── src/
 │   │   ├── main.ts / app.module.ts / app.setup.ts
 │   │   ├── common/               # DomainError, filtro HTTP 422, ZodValidationPipe
 │   │   ├── health/
 │   │   └── modules/
-│   │       ├── catalog/          # maestro de productos con atributos logísticos
+│   │       ├── master-data/      # DATOS DE LA EMPRESA: bodega, camiones, productos, obras,
+│   │       │   ├── domain/       #   pedidos · master-data.ts (validaciones, + spec)
+│   │       │   ├── application/  #   master-data.ts (sin framework) · state-store.port.ts
+│   │       │   ├── infrastructure/ # postgres-state-store.ts (DATABASE_URL)
+│   │       │   └── http/         #   /master-data (Zod)
+│   │       ├── catalog/          # productos con atributos logísticos (de los datos maestros)
 │   │       ├── picking/          # carros y VALIDACIÓN DE MEZCLA INCOMPATIBLE
 │   │       │   ├── domain/       #   cart.ts · mix-policy.ts · mix-validator.ts (+ spec)
 │   │       │   ├── application/  #   picking.service.ts
@@ -123,18 +135,18 @@ TORRE-DE-CONTROL-/
 │   │       │   │                 #   road-adjustment.ts (+ specs)
 │   │       │   ├── application/  #   route-planner.ts · road-refinement.ts (sin framework:
 │   │       │   │                 #   los reusa el frontend) · road-router.port.ts
-│   │       │   └── infrastructure/ # demo-network.ts · tomtom.ts (rutas con tráfico) ·
-│   │       │                     #   overpass.ts (semáforos y peajes de OpenStreetMap)
+│   │       │   └── infrastructure/ # tomtom.ts (rutas con tráfico) · overpass.ts
+│   │       │                     #   (semáforos y peajes de OpenStreetMap)
 │   │       ├── tracking/         # RASTREO GPS de conductores
-│   │       │   ├── domain/       #   tracking.ts (filtro GPS, paradas, aviso) · simulator.ts
+│   │       │   ├── domain/       #   tracking.ts (filtro GPS, paradas, aviso)
 │   │       │   ├── application/  #   tracking-hub.ts (sesiones, eventos, flota en vivo)
-│   │       │   ├── http/         #   tracking.controller.ts (+ flujo SSE /tracking/stream)
-│   │       │   └── infrastructure/ # demo-fleet-runner.ts (camiones simulados)
+│   │       │   └── http/         #   tracking.controller.ts (+ flujo SSE /tracking/stream)
 │   │       ├── staging/              (fase 2) andenes, reservas y pallets con QR
 │   │       ├── route-restrictions/   (fase 3) evaluador de la matriz urbana/rural
 │   │       ├── notifications/        (fase 3) outbox → WhatsApp/SMS
 │   │       └── epod/                 (fase 3) firma + foto georreferenciada
-│   └── test/                     # e2e con supertest (API, rastreo, SSE)
+│   └── test/                     # e2e con supertest (datos maestros, API, rastreo, SSE)
+│       └── fixtures/             # datos de prueba SÓLO para tests (la app no los usa)
 └── frontend/                     # Vite 8 · React 19 · Tailwind 4 · componentes estilo shadcn/ui
     ├── scripts/inline-html.mjs   # empaqueta la app en dist/torre-control.html
     └── src/
@@ -146,8 +158,9 @@ TORRE-DE-CONTROL-/
         │   └── map/              # leaflet.ts (mapa, marcadores y rutas) · basemaps.ts y
         │                         # BasemapControl.tsx (TomTom/Esri/MapTiler, tráfico, clave)
         ├── features/
+        │   ├── master-data/                      # Flota y bodega · Productos · Obras y pedidos
         │   ├── picking/MixCheckPage.tsx          # validador de mezcla
-        │   ├── load-planning/CubicajePage.tsx    # simulador de cubicaje
+        │   ├── load-planning/CubicajePage.tsx    # cubicaje de carga
         │   ├── routing/RoutePlannerPage.tsx      # optimizar, ajustar por calles y publicar
         │   ├── routing/RoadRouteDetails.tsx      # detalle: tráfico, peajes, semáforos, Waze
         │   ├── tracking/LiveMapPage.tsx          # mapa en vivo de la flota
@@ -351,7 +364,7 @@ POST /api/v1/picking/mix-check
    P·(L−x)/L. Cada eje se compara con el menor entre su capacidad de fabricante y el límite
    legal chileno (DS 158 MOP: 7 t eje simple rueda simple, 11 t rueda doble), y se exige al
    menos un 20 % del peso sobre la dirección. La posición de la carga (cabina, centro o cola)
-   es un parámetro del simulador.
+   es un parámetro del cubicaje.
 
 Recomienda el vehículo factible de **menor costo por km**. Si nada cabe en un viaje, sugiere
 dividir la carga (cota mínima de viajes, considerando sólo vehículos cuyos problemas se
@@ -374,10 +387,12 @@ llamar al cubicaje.
 
 ### 5.3 Rastreo GPS y mapa en vivo
 
-- **Modo conductor** (`#conductor`, pensado para el teléfono): el conductor ingresa su nombre,
-  elige el vehículo y toca *Activar GPS e iniciar ruta*. El teléfono envía su posición cada
-  5 s; si pierde señal acumula las lecturas y las manda al recuperarla. Ve su próxima obra con
-  la hora estimada de llegada, sus paradas y lo que lleva para cada una.
+- **Modo conductor** (`#conductor`, pensado para el teléfono): el conductor ingresa su nombre
+  y teléfono (opcional, para que la torre lo llame), elige su camión de la lista de *Flota y
+  bodega* y toca *Activar GPS e iniciar ruta*; el teléfono recuerda sus datos. Envía su
+  posición cada 5 s; si pierde señal acumula las lecturas y las manda al recuperarla. Si el
+  servidor se reinicia, la ruta se retoma sola (`SESION_DESCONOCIDA`). Ve su próxima obra con
+  la hora estimada de llegada, sus paradas, lo que lleva y botones para navegar con Waze.
 - **Filtro del GPS** (`tracking/domain/tracking.ts`): descarta lecturas con más de 100 m de
   error, fuera de orden o con saltos imposibles (más de 150 km/h).
 - **Paradas y avisos**: con la ETA (línea recta × 1,3 a la velocidad actual o 40 km/h) se
@@ -388,12 +403,9 @@ llamar al cubicaje.
   eventos. Se actualiza por Server-Sent Events, sin recargar. Al elegir un vehículo, *lo
   que falta* (punteado) se dibuja por calles desde su posición, por sus obras pendientes y
   de vuelta a la bodega (una consulta a TomTom al elegirlo y al terminar cada obra).
-- En modo demostración (`TRACKING_DEMO`, activo por defecto) camiones simulados recorren el
-  plan publicado **por las calles** (`tracking/domain/simulator.ts` corta el trazado en un
-  tramo por obra): al arrancar, el plan de ejemplo se calcula con TomTom (una consulta por
-  camión; en el navegador queda guardado 3 h en el equipo). Sin conexión o si TomTom no
-  responde en 8 s, se usan las rutas estimadas. Un conductor real reemplaza al simulado de
-  su vehículo y su trayecto es el de su GPS.
+- Sin simulación: en el mapa sólo aparecen los teléfonos de conductores reales. Las
+  sesiones y recorridos viven en la memoria del servidor (se guardan en PostgreSQL en la
+  fase 3); los datos de la empresa sí quedan guardados (sección 5.6).
 
 Límite importante: el navegador del teléfono **sólo envía la ubicación con la app abierta en
 pantalla** (se pide mantener la pantalla encendida). El rastreo con el teléfono bloqueado o en
@@ -412,7 +424,8 @@ para minimizar el diésel, con la técnica habitual de los sistemas de ruteo (TM
    camiones. El consumo se interpola entre vacío y plena carga según lo que va a bordo en cada
    tramo, así que conviene descargar lo pesado temprano.
 4. Se compara con el **despacho manual** (orden de nota de venta, primer camión que sirva) y se
-   informa el ahorro en litros, pesos y CO₂. Con los pedidos de ejemplo ahorra 10,5 L (13 %).
+   informa el ahorro en litros, pesos y CO₂ (con los pedidos de prueba de los tests ahorra
+   10,5 L, 13 %).
 
 Al **publicar** el plan, cada conductor ve su ruta y su carga al iniciar en modo conductor.
 El optimizador estima distancias en línea recta × 1,3; antes de publicar, *Ajustar con calles
@@ -470,11 +483,36 @@ Los conductores no la necesitan: navegan con Waze o Google Maps.
 - Las consultas salen del navegador hacia `api.tomtom.com` y `overpass-api.de`; si una red
   bloquea esos dominios, el resto de la app funciona igual y el panel lo informa.
 
+### 5.6 Datos de la empresa (la app parte vacía)
+
+`master-data/` guarda lo que carga la empresa, en este orden:
+
+1. **Flota y bodega** (`#flota`): cada camión con su patente y tipo (camioneta, camión 3/4,
+   camión pluma: definen capacidad, ejes y consumo) y la bodega de salida marcada en el mapa
+   (tocando el mapa, con *Usar mi ubicación actual* o pegando un enlace de Google Maps). La
+   misma pantalla muestra el enlace para los teléfonos de los conductores.
+2. **Productos** (`#productos`): SKU, nombre, clase de manejo, peso y medidas por unidad,
+   frágil y si requiere grúa. Los usan el validador de mezcla, el cubicaje y los pedidos.
+3. **Obras y pedidos** (`#obras`): obras con ubicación, comuna, aviso al capataz y si tienen
+   grúa; pedidos con nota de venta, obra y productos. *Optimizar rutas* los planifica.
+
+Validaciones en `master-data/domain/master-data.ts` (patente, medidas, pedidos contra obras y
+productos registrados; no deja borrar una obra o producto que usa un pedido). Se guardan como
+un documento JSON en PostgreSQL (`app_state`, migración 004) cuando hay `DATABASE_URL`; sin
+ella, en memoria. En la versión sin servidor (GitHub Pages, archivo HTML) quedan en el
+navegador de ese equipo.
+
 ### Otros endpoints
 
 | Método | Ruta | Uso |
 |---|---|---|
 | GET | `/api/v1/health` | Salud |
+| GET | `/api/v1/master-data` | Bodega, tipos de vehículo, camiones, productos, obras y pedidos |
+| PUT | `/api/v1/master-data/depot` | Guarda la bodega de salida |
+| POST · DELETE | `/api/v1/master-data/vehicles` · `/vehicles/:plate` | Agrega o edita · quita un camión |
+| POST · DELETE | `/api/v1/master-data/products` · `/products/:sku` | Agrega o edita · quita un producto |
+| POST · DELETE | `/api/v1/master-data/sites` · `/sites/:id` | Agrega o edita · quita una obra |
+| POST · DELETE | `/api/v1/master-data/orders` · `/orders/:id` | Agrega o edita · quita un pedido |
 | GET | `/api/v1/catalog/products` | Catálogo con atributos logísticos |
 | GET | `/api/v1/picking/cart-types` | Capacidades por tipo de carro |
 | POST | `/api/v1/picking/cart-audit` | Revisión completa de un carro |
@@ -492,7 +530,9 @@ Los conductores no la necesitan: navegan con Waze o Google Maps.
 | GET | `/api/v1/tracking/live` · `/api/v1/tracking/stream` | Flota en vivo (foto · flujo SSE) |
 
 Errores: `400 SOLICITUD_INVALIDA` con detalle por campo (Zod) y `422` para reglas de negocio
-(`SKU_DESCONOCIDO`, `CANTIDAD_INVALIDA`, `CARGA_VACIA`, `AJUSTE_INVALIDO`, `PLAN_PUBLICADO`).
+(`SKU_DESCONOCIDO`, `CANTIDAD_INVALIDA`, `CARGA_VACIA`, `AJUSTE_INVALIDO`, `PLAN_PUBLICADO`,
+`PATENTE_INVALIDA`, `SIN_BODEGA`, `SIN_VEHICULOS`, `OBRA_CON_PEDIDOS`, `PRODUCTO_EN_USO`,
+`SESION_DESCONOCIDA`).
 
 ## 6. Usar la app
 
@@ -501,26 +541,30 @@ importa el dominio desde `backend/src`):
 
 | Modo | Cuándo | Qué necesita |
 |---|---|---|
-| **Local** (por defecto) | Probar y usar las reglas desde cualquier dispositivo | Nada: todo se calcula en el navegador |
-| **API** | Rastreo real entre dispositivos (teléfonos de conductores → torre de control) | El backend NestJS publicado con HTTPS |
+| **Local** (GitHub Pages, archivo HTML) | Usar las herramientas en un solo equipo | Nada: todo se calcula y guarda en ese navegador |
+| **Servidor** (Render) | **Operación real**: teléfonos de conductores → mapa de la torre, datos compartidos | El servicio publicado (abajo) |
 
 ### Publicar en internet (necesario para el GPS de los conductores)
 
 El GPS del navegador exige `https://`, y para que la torre vea los teléfonos todos deben
 hablar con el mismo servidor. El repositorio trae la imagen (`Dockerfile`: API + interfaz en
-un solo servicio) y el blueprint de Render (`render.yaml`):
+un solo servicio) y el blueprint de Render (`render.yaml`: el servicio y una base
+PostgreSQL gratuita donde quedan los datos de la empresa):
 
-1. Crear una cuenta en [render.com](https://render.com) y conectar GitHub.
-2. *New → Blueprint* → elegir este repositorio → *Apply*.
+1. Crear una cuenta en [render.com](https://render.com) con *Sign in with GitHub* (gratis).
+2. *New → Blueprint* → elegir este repositorio → *Apply*. Render crea la base de datos y el
+   servicio (la primera vez tarda unos minutos).
 3. Abrir la URL que entrega Render (`https://torre-control-xxxx.onrender.com`). Usuario
    `torre`; la clave está en el servicio → *Environment* → `BASIC_AUTH_PASSWORD`.
-4. En los teléfonos de los conductores abrir `…/#conductor`; en la oficina, `…/#mapa`.
+4. Cargar camiones y bodega en *Flota y bodega*; compartir con los conductores el enlace
+   `…/#conductor` que aparece ahí; en la oficina, `…/#mapa`.
 
-Notas: el plan gratuito de Render duerme tras un rato sin uso (la primera visita tarda) y el
-estado vive en memoria hasta conectar PostgreSQL (fase 2), así que se reinicia con cada
-despliegue. Para operar sin camiones simulados: `TRACKING_DEMO=false`. El servidor usa la
-clave de TomTom de la empresa para el plan de demostración (`TOMTOM_API_KEY` la reemplaza). Cualquier servicio que
-ejecute Docker sirve igual (Railway, Fly.io, un VPS).
+Notas: el plan gratuito de Render duerme tras 15 minutos sin uso (la primera visita tarda
+cerca de un minuto; mientras un conductor envía su GPS no duerme). La base PostgreSQL
+gratuita de Render **vence a los 30 días**: antes de eso, pasarla al plan pagado o apuntar
+`DATABASE_URL` a otra base (por ejemplo Neon o Supabase, que tienen plan gratuito). Las
+rutas en curso viven en memoria: si el servidor se reinicia, los teléfonos las retoman solos.
+Cualquier servicio que ejecute Docker sirve igual (Railway, Fly.io, un VPS).
 
 ### Abrir desde el celular o el computador
 
@@ -528,9 +572,10 @@ ejecute Docker sirve igual (Railway, Fly.io, un VPS).
   Cada push a `main` verifica todo y publica la app en la rama `gh-pages`. Activarlo **una
   sola vez**: *Settings → Pages → Build and deployment → Source: Deploy from a branch →
   Branch: `gh-pages` / `(root)` → Save*. A los 1–2 minutos el enlace queda funcionando.
-  Es la interfaz en modo local (todo se calcula en el navegador, con camiones de
-  demostración); el rastreo real entre teléfonos necesita el servidor (sección anterior).
-  El sitio es **público**: cualquiera con el enlace puede abrirlo.
+  Es la interfaz sin servidor: los datos quedan en el navegador de cada equipo y el mapa sólo
+  ve el modo conductor abierto en ese mismo equipo; el rastreo real entre teléfonos usa el
+  servidor (sección anterior). El sitio es **público**: cualquiera con el enlace puede
+  abrirlo.
 - **Archivo HTML:** el mismo workflow deja `torre-control.html` en *Actions → (última
   ejecución) → Artifacts*. Se descarga y se abre con doble clic o desde el gestor de
   archivos del teléfono. También se genera localmente con `npm run build:html` (queda en
@@ -548,27 +593,28 @@ npm run dev:web:api    # interfaz en modo API (proxy /api → :3000)
 
 npm run check          # typecheck + lint + tests unitarios + e2e + build del frontend
 npm run build:html     # app en un solo archivo: frontend/dist/torre-control.html
-npm run db:up          # PostgreSQL + PostGIS con esquema y datos de demostración
+npm run db:up          # PostgreSQL + PostGIS con el esquema (sin datos de muestra)
 ```
 
-La API todavía usa catálogo y flota **en memoria** (los mismos datos del seed), así que no
-necesita la base de datos para probar las dos reglas.
+Sin `DATABASE_URL` la API guarda los datos de la empresa en memoria; con
+`DATABASE_URL=postgres://torre:torre_dev@localhost:5432/torre_control` (ver `.env.example`)
+los guarda en la base de `npm run db:up`.
 
 ## 7. Supuestos y valores a validar con la operación
 
 Todos están en un solo lugar y son fáciles de cambiar:
 
-- **Flota** (`load-planning/infrastructure/default-fleet.ts` y seed): especificaciones
-  representativas de camioneta, camión 3/4 y camión pluma. Reemplazar por las fichas técnicas
+- **Tipos de vehículo** (`load-planning/infrastructure/default-fleet.ts`): especificaciones
+  representativas de camioneta, camión 3/4 y camión pluma (los camiones con patente los
+  carga la empresa). Reemplazar por las fichas técnicas
   reales (PBV, tara por eje, distancia entre ejes, plataforma, capacidad de la pluma).
 - **Límites legales por eje**: DS 158/1980 MOP como referencia. Puentes y caminos rurales
   pueden ser más restrictivos y van en `circulation_rules`.
-- **Restricciones de circulación del seed**: son **ilustrativas**. Hay que validarlas con la
+- **Restricciones de circulación** (`circulation_rules`, fase 3): hay que definirlas con la
   Dirección de Tránsito de Los Ángeles y con Vialidad antes de operar.
 - **Matriz de mezcla, umbral de 20 kg y aviso al 90 %** (`picking/domain/mix-policy.ts`):
   revisar con el jefe de bodega.
 - **Capacidades de carros** (`picking/domain/cart.ts`): medir los carros reales.
-- **Coordenadas** de bodega, obras y zonas: aproximadas.
 - **Consumo de diésel por vehículo** (vacío / plena carga, L/100 km) y **precio del diésel**
   (1.050 CLP/L por defecto, editable en pantalla): reemplazar por los rendimientos reales de
   cada camión.

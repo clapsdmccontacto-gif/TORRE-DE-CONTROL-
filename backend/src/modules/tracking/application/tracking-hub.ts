@@ -5,13 +5,6 @@ import { roundTo } from '../../../common/math.js';
 import type { FleetUnit, PlannedRoute } from '../../routing/domain/optimizer.js';
 import type { RoutePlan } from '../../routing/application/route-planner.js';
 import {
-  simulatePosition,
-  simulateTrack,
-  simulatedTripDurationMs,
-  tripLegs,
-  type SimulatedTrip,
-} from '../domain/simulator.js';
-import {
   DEFAULT_TRACKING_POLICY,
   deviceStatus,
   effectiveSpeedKmh,
@@ -35,15 +28,17 @@ export interface CargoLine {
 
 export interface DriverSessionInput {
   driverName: string;
+  /** Opcional: para que la torre pueda llamar al conductor. */
+  driverPhone?: string | null;
   vehiclePlate: string;
 }
 
 export interface DriverSession {
   id: string;
   driverName: string;
+  driverPhone: string | null;
   vehiclePlate: string;
   vehicleName: string;
-  simulated: boolean;
   startedAt: string;
   endedAt: string | null;
   /** Paradas de su ruta en el plan publicado (vacío si no tiene ruta asignada). */
@@ -62,9 +57,9 @@ export interface LiveStop {
 export interface LiveDevice {
   sessionId: string;
   driverName: string;
+  driverPhone: string | null;
   vehiclePlate: string;
   vehicleName: string;
-  simulated: boolean;
   status: DeviceStatus;
   position: PositionFix | null;
   speedKmh: number | null;
@@ -99,7 +94,8 @@ export interface IngestResult {
 }
 
 export interface TrackingHubDeps {
-  units: readonly FleetUnit[];
+  /** Camiones registrados por la empresa. */
+  units: () => readonly FleetUnit[];
   activePlan: () => RoutePlan | null;
   now?: () => number;
   policy?: TrackingPolicy;
@@ -112,22 +108,16 @@ interface SessionState {
   fixes: PositionFix[];
   speedKmh: number | null;
   nextStopEtaMin: number | null;
-  trip: SimulatedTrip | null;
 }
 
 const MAX_TRACK_POINTS = 5_000;
 const MAX_EVENTS = 200;
 const SNAPSHOT_EVENTS = 30;
-const SIMULATED_SPEED_KMH = 45;
-const SIMULATED_DWELL_MIN = 20;
-/** Historial inicial de los camiones simulados: cada ~125 m, para que siga las curvas. */
-const SIMULATED_HISTORY_EVERY_SEC = 10;
 
 /**
  * Caso de uso "rastrear la flota": sesiones de conductores, lecturas GPS, avance de
- * paradas, eventos (aviso al capataz, llegada, salida) y vehículos simulados para
- * demostración. Estado en memoria; sin dependencias de framework, de modo que lo usan
- * el backend y el modo local del frontend.
+ * paradas y eventos (aviso al capataz, llegada, salida). Estado en memoria; sin
+ * dependencias de framework, de modo que lo usan el backend y el modo local del frontend.
  */
 export class TrackingHub {
   private readonly deps: TrackingHubDeps;
@@ -143,9 +133,16 @@ export class TrackingHub {
 
   /** Inicia la ruta de un conductor. Reemplaza otra sesión activa del mismo vehículo. */
   startSession(input: DriverSessionInput): DriverSession {
-    const driverName = input.driverName.trim();
+    const driverName = input.driverName.trim().replace(/\s+/g, ' ');
     if (driverName.length < 2) {
       throw new DomainError('CONDUCTOR_INVALIDO', 'Ingrese el nombre del conductor.');
+    }
+    const driverPhone = input.driverPhone?.trim() || null;
+    if (driverPhone && !/^\+?[\d\s-]{8,20}$/.test(driverPhone)) {
+      throw new DomainError(
+        'TELEFONO_INVALIDO',
+        'Ingrese el teléfono con sólo números (ej. +56 9 1234 5678).',
+      );
     }
     const unit = this.unit(input.vehiclePlate);
     for (const state of this.sessions.values()) {
@@ -154,7 +151,7 @@ export class TrackingHub {
       }
     }
     const route = this.deps.activePlan()?.routes.find((r) => r.unitPlate === unit.plate) ?? null;
-    const state = this.createState(driverName, unit, route, false, null);
+    const state = this.createState(driverName, driverPhone, unit, route);
     this.notify();
     return state.session;
   }
@@ -176,7 +173,7 @@ export class TrackingHub {
 
   track(sessionId: string): { fixes: PositionFix[]; summary: ReturnType<typeof summarizeTrack> } {
     const state = this.sessions.get(sessionId);
-    if (!state) throw new DomainError('SESION_DESCONOCIDA', 'La sesión de ruta no existe.');
+    if (!state) throw unknownSession();
     return { fixes: [...state.fixes], summary: summarizeTrack(state.fixes) };
   }
 
@@ -185,10 +182,7 @@ export class TrackingHub {
     const devices = [...this.sessions.values()]
       .filter((s) => !s.session.endedAt)
       .map((s) => this.describe(s, now))
-      .sort(
-        (a, b) =>
-          Number(a.simulated) - Number(b.simulated) || a.vehiclePlate.localeCompare(b.vehiclePlate),
-      );
+      .sort((a, b) => a.vehiclePlate.localeCompare(b.vehiclePlate));
     return {
       generatedAt: new Date(now).toISOString(),
       devices,
@@ -196,54 +190,9 @@ export class TrackingHub {
     };
   }
 
-  /** Camiones simulados que recorren el plan publicado (sólo para demostración). */
-  startSimulation(plan: RoutePlan | null): void {
-    for (const state of this.sessions.values()) {
-      if (state.session.simulated) this.sessions.delete(state.session.id);
-    }
-    this.events = this.events.filter((e) => this.sessions.has(e.sessionId));
-    if (!plan) return;
-
-    const now = this.now();
-    plan.routes.forEach((route, index) => {
-      const takenByDriver = [...this.sessions.values()].some(
-        (s) => s.session.vehiclePlate === route.unitPlate && !s.session.endedAt,
-      );
-      if (takenByDriver) return;
-      const trip: SimulatedTrip = {
-        legs: tripLegs(
-          route.path,
-          route.stops.map((stop) => stop.location),
-        ),
-        speedKmh: SIMULATED_SPEED_KMH,
-        dwellMinutes: SIMULATED_DWELL_MIN,
-        startedAtMs: 0,
-      };
-      // Cada camión parte en un punto distinto de su recorrido para que el mapa se vea vivo.
-      const progress = 0.15 + 0.2 * index;
-      trip.startedAtMs = now - Math.min(progress, 0.9) * simulatedTripDurationMs(trip);
-      const state = this.createState(
-        `Conductor demo ${index + 1}`,
-        this.unit(route.unitPlate),
-        route,
-        true,
-        trip,
-      );
-      this.apply(state, simulateTrack(trip, now, SIMULATED_HISTORY_EVERY_SEC));
-    });
-    this.notify();
-  }
-
-  /** Avanza los camiones simulados hasta el instante actual. */
-  tick(): void {
-    const now = this.now();
-    let moved = false;
-    for (const state of this.sessions.values()) {
-      if (!state.trip || state.session.endedAt) continue;
-      this.apply(state, [simulatePosition(state.trip, now)]);
-      moved = true;
-    }
-    if (moved) this.notify();
+  /** Vuelve a avisar la foto de la flota (p. ej. para pasar a "sin señal" a quien dejó de reportar). */
+  refresh(): void {
+    if ([...this.sessions.values()].some((s) => !s.session.endedAt)) this.notify();
   }
 
   subscribe(listener: (snapshot: FleetSnapshot) => void): () => void {
@@ -253,10 +202,9 @@ export class TrackingHub {
 
   private createState(
     driverName: string,
+    driverPhone: string | null,
     unit: FleetUnit,
     route: PlannedRoute | null,
-    simulated: boolean,
-    trip: SimulatedTrip | null,
   ): SessionState {
     const stops: TrackedStop[] = (route?.stops ?? []).map((s) => ({
       deliveryId: s.deliveryId,
@@ -270,12 +218,12 @@ export class TrackingHub {
       (route?.stops ?? []).map((s) => [s.deliveryId, { cargo: s.lines, weightKg: s.weightKg }]),
     );
     const session: DriverSession = {
-      id: newId(simulated ? 'SIM' : 'RUTA'),
+      id: newId('RUTA'),
       driverName,
+      driverPhone,
       vehiclePlate: unit.plate,
       vehicleName: unit.vehicle.name,
-      simulated,
-      startedAt: new Date(trip?.startedAtMs ?? this.now()).toISOString(),
+      startedAt: new Date(this.now()).toISOString(),
       endedAt: null,
       stops: [],
     };
@@ -286,7 +234,6 @@ export class TrackingHub {
       fixes: [],
       speedKmh: null,
       nextStopEtaMin: null,
-      trip,
     };
     session.stops = this.liveStops(state);
     this.sessions.set(session.id, state);
@@ -342,9 +289,9 @@ export class TrackingHub {
     return {
       sessionId: state.session.id,
       driverName: state.session.driverName,
+      driverPhone: state.session.driverPhone,
       vehiclePlate: state.session.vehiclePlate,
       vehicleName: state.session.vehicleName,
-      simulated: state.session.simulated,
       status: deviceStatus(position, state.speedKmh, now, this.policy),
       position,
       speedKmh: state.speedKmh === null ? null : roundTo(state.speedKmh, 0),
@@ -410,16 +357,22 @@ export class TrackingHub {
 
   private activeState(sessionId: string): SessionState {
     const state = this.sessions.get(sessionId);
-    if (!state || state.session.endedAt) {
+    // Desconocida = el servidor se reinició: el teléfono puede reanudar la ruta solo.
+    if (!state) throw unknownSession();
+    if (state.session.endedAt) {
       throw new DomainError('SESION_NO_ACTIVA', 'La ruta no está activa; iníciela de nuevo.');
     }
     return state;
   }
 
   private unit(plate: string): FleetUnit {
-    const unit = this.deps.units.find((u) => u.plate === plate);
-    if (!unit)
-      throw new DomainError('VEHICULO_DESCONOCIDO', `El vehículo ${plate} no está en la flota.`);
+    const unit = this.deps.units().find((u) => u.plate === plate);
+    if (!unit) {
+      throw new DomainError(
+        'VEHICULO_DESCONOCIDO',
+        `El vehículo ${plate} no está en la flota: agréguelo en «Flota y bodega».`,
+      );
+    }
     return unit;
   }
 
@@ -432,6 +385,10 @@ export class TrackingHub {
   private now(): number {
     return this.deps.now?.() ?? Date.now();
   }
+}
+
+function unknownSession(): DomainError {
+  return new DomainError('SESION_DESCONOCIDA', 'La sesión de ruta no existe en el servidor.');
 }
 
 function mergeCargo(lines: readonly CargoLine[]): CargoLine[] {

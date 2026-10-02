@@ -1,5 +1,5 @@
 # Base de datos local de desarrollo: PostgreSQL 16 + PostGIS 3.4.
-# Al crear el volumen por primera vez aplica la migración y los datos de demostración.
+# Al crear el volumen por primera vez aplica las migraciones (sin datos de muestra).
 # Para recrearla desde cero: npm run db:reset
 services:
   db:
@@ -17,7 +17,7 @@ services:
       - ./database/migrations/001_init.sql:/docker-entrypoint-initdb.d/20_001_init.sql:ro
       - ./database/migrations/002_tracking_routing.sql:/docker-entrypoint-initdb.d/21_002_tracking_routing.sql:ro
       - ./database/migrations/003_road_routing.sql:/docker-entrypoint-initdb.d/22_003_road_routing.sql:ro
-      - ./database/seeds/001_demo_data.sql:/docker-entrypoint-initdb.d/90_001_demo_data.sql:ro
+      - ./database/migrations/004_app_state.sql:/docker-entrypoint-initdb.d/23_004_app_state.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U torre -d torre_control"]
       interval: 5s

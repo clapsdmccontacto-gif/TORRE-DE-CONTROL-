@@ -21,8 +21,8 @@ const CALCULATE_ROUTE_URL = 'https://api.tomtom.com/routing/1/calculateRoute';
  * Clave de TomTom de Constructor Center, incluida a pedido de la empresa para que mapa,
  * tráfico y rutas funcionen en todos los equipos sin configurar nada. Es una clave de
  * navegador (plan gratuito, sin tarjeta): quien use la app puede verla. Para cambiarla,
- * crear otra en developer.tomtom.com → Keys y reemplazarla aquí. La reemplazan
- * VITE_TOMTOM_KEY (interfaz, al compilar) y TOMTOM_API_KEY (servidor); vacías = sin clave.
+ * crear otra en developer.tomtom.com → Keys y reemplazarla aquí. VITE_TOMTOM_KEY la
+ * reemplaza al compilar la interfaz (vacía = sin clave).
  */
 export const COMPANY_TOMTOM_KEY = '66qzlnRDJMzyCIACdNvHPuujLrRuEYGc';
 const MAX_POINTS = 150;

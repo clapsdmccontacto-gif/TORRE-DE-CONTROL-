@@ -1,6 +1,9 @@
 import {
   ClipboardList,
   Clock,
+  HardHat,
+  Package,
+  Warehouse,
   LoaderCircle,
   Map as MapIcon,
   PenLine,
@@ -16,6 +19,9 @@ import { useEffect, useState } from 'react';
 import { StatusBanner } from '@/components/status';
 import { Badge } from '@/components/ui/badge';
 import { CubicajePage } from '@/features/load-planning/CubicajePage';
+import { FleetPage } from '@/features/master-data/FleetPage';
+import { ProductsPage } from '@/features/master-data/ProductsPage';
+import { SitesOrdersPage } from '@/features/master-data/SitesOrdersPage';
 import { MixCheckPage } from '@/features/picking/MixCheckPage';
 import { RoutePlannerPage } from '@/features/routing/RoutePlannerPage';
 import { DriverPage } from '@/features/tracking/DriverPage';
@@ -34,6 +40,29 @@ interface NavItem {
 
 const NAV: { group: string; items: NavItem[] }[] = [
   {
+    group: 'Datos de la empresa',
+    items: [
+      {
+        label: 'Flota y bodega',
+        icon: Warehouse,
+        route: 'flota',
+        description: 'Sus camiones (patente y tipo) y la bodega desde donde salen las rutas.',
+      },
+      {
+        label: 'Productos',
+        icon: Package,
+        route: 'productos',
+        description: 'Catálogo con peso, medidas y clase de manejo de cada producto.',
+      },
+      {
+        label: 'Obras y pedidos',
+        icon: HardHat,
+        route: 'obras',
+        description: 'Dónde se entrega y qué se entrega: lo que planifica el optimizador.',
+      },
+    ],
+  },
+  {
     group: 'Logística interna',
     items: [
       { label: 'Monitor de picking', icon: ClipboardList },
@@ -51,7 +80,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     group: 'Última milla',
     items: [
       {
-        label: 'Simulador de cubicaje',
+        label: 'Cubicaje de carga',
         icon: Truck,
         route: 'cubicaje',
         description: 'Peso, volumen, largo, pluma y carga por eje para elegir el vehículo.',
@@ -80,7 +109,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
   },
 ];
 
-const DEFAULT_ROUTE = 'mezcla';
+const DEFAULT_ROUTE = 'mapa';
 
 function useHashRoute(): string {
   const read = () => window.location.hash.slice(1) || DEFAULT_ROUTE;
@@ -98,22 +127,31 @@ interface Catalog {
   cartTypes: CartSpec[];
 }
 
-function useCatalog() {
+/** Catálogo para mezcla y cubicaje; se vuelve a leer al entrar (pudo cambiar en «Productos»). */
+function useCatalog(needed: boolean) {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
+    if (!needed) return;
+    let active = true;
     Promise.all([api.products(), api.cartTypes()])
-      .then(([products, cartTypes]) => setCatalog({ products, cartTypes }))
-      .catch((e: unknown) => setError(errorMessage(e)));
-  }, []);
+      .then(([products, cartTypes]) => active && setCatalog({ products, cartTypes }))
+      .catch((e: unknown) => active && setError(errorMessage(e)));
+    return () => {
+      active = false;
+    };
+  }, [needed]);
   return { catalog, error };
 }
 
 export default function App() {
   const route = useHashRoute();
-  const { catalog, error } = useCatalog();
+  const items = NAV.flatMap((g) => g.items);
   const current =
-    NAV.flatMap((g) => g.items).find((item) => item.route === route) ?? NAV[0].items[1];
+    items.find((item) => item.route === route) ??
+    items.find((item) => item.route === DEFAULT_ROUTE)!;
+  const needsCatalog = current.route === 'mezcla' || current.route === 'cubicaje';
+  const { catalog, error } = useCatalog(needsCatalog);
 
   if (current.route === 'conductor') {
     return (
@@ -139,8 +177,6 @@ export default function App() {
       </div>
     );
   }
-
-  const needsCatalog = current.route === 'mezcla' || current.route === 'cubicaje';
 
   return (
     <div className="flex min-h-svh">
@@ -169,9 +205,11 @@ export default function App() {
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="border-b bg-card px-4 py-4 sm:px-6">
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span>Bodega Los Ángeles</span>
+            <span>Constructor Center</span>
             <Badge variant="outline">
-              {apiMode === 'local' ? 'Demo · cálculo en el dispositivo' : 'Conectado a la API'}
+              {apiMode === 'local'
+                ? 'Sin servidor · datos sólo en este equipo'
+                : 'Conectado al servidor'}
             </Badge>
           </div>
           <h1 className="text-xl font-semibold">{current.label}</h1>
@@ -199,10 +237,24 @@ export default function App() {
               <LoaderCircle className="size-4 animate-spin" /> Cargando catálogo…
             </p>
           )}
+          {needsCatalog && catalog && catalog.products.length === 0 && (
+            <StatusBanner status="warning" title="Todavía no hay productos">
+              Esta herramienta usa su catálogo. Agréguelos en{' '}
+              <a className="font-medium text-foreground underline" href="#productos">
+                Productos
+              </a>
+              .
+            </StatusBanner>
+          )}
+          {current.route === 'flota' && <FleetPage />}
+          {current.route === 'productos' && <ProductsPage />}
+          {current.route === 'obras' && <SitesOrdersPage />}
           {current.route === 'rutas' && <RoutePlannerPage />}
           {current.route === 'mapa' && <LiveMapPage />}
-          {current.route === 'cubicaje' && catalog && <CubicajePage products={catalog.products} />}
-          {current.route === 'mezcla' && catalog && (
+          {current.route === 'cubicaje' && catalog && catalog.products.length > 0 && (
+            <CubicajePage products={catalog.products} />
+          )}
+          {current.route === 'mezcla' && catalog && catalog.products.length > 0 && (
             <MixCheckPage products={catalog.products} cartTypes={catalog.cartTypes} />
           )}
         </main>

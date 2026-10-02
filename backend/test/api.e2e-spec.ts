@@ -4,6 +4,7 @@ import request from 'supertest';
 import type { App } from 'supertest/types.js';
 import { AppModule } from '../src/app.module.js';
 import { configureApp } from '../src/app.setup.js';
+import { seedTestData } from './seed.js';
 
 describe('API Torre de Control (e2e)', () => {
   let app: INestApplication<App>;
@@ -12,6 +13,7 @@ describe('API Torre de Control (e2e)', () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = configureApp(moduleRef.createNestApplication()) as INestApplication<App>;
     await app.init();
+    await seedTestData(app);
   });
 
   afterAll(async () => {

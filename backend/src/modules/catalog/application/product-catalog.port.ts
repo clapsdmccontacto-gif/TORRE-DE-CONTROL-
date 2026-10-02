@@ -1,8 +1,8 @@
 import type { Product } from '../domain/product.js';
 
 /**
- * Puerto de lectura del maestro de productos. Hoy lo implementa un catálogo en
- * memoria; el adaptador PostgreSQL (tabla `products`) lo reemplaza sin tocar el dominio.
+ * Puerto de lectura del maestro de productos. Lo implementan los datos maestros que carga
+ * la empresa (`MasterDataProductCatalog`).
  */
 export abstract class ProductCatalog {
   abstract list(): Promise<Product[]>;

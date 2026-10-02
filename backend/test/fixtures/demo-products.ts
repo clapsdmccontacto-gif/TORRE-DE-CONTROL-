@@ -1,8 +1,8 @@
-import type { Product } from '../domain/product.js';
+import type { Product } from '../../src/modules/catalog/domain/product.js';
 
 /**
- * Catálogo de demostración (mismo contenido que database/seeds/001_demo_data.sql).
- * Mantener ambos sincronizados hasta conectar el adaptador PostgreSQL.
+ * Catálogo de prueba: sólo lo usan los tests (la app parte vacía y los productos se
+ * cargan en «Productos»).
  */
 export const DEMO_PRODUCTS: readonly Product[] = [
   {

@@ -4,13 +4,16 @@ import { Input, NativeSelect } from '@/components/ui/input';
 import { HANDLING_CLASS_LABEL } from '@/lib/format';
 import type { Product, SkuQuantity } from '@/types/api';
 
+/** Lo mínimo que necesita el selector (sirve con el catálogo o con los datos maestros). */
+type ProductOption = Pick<Product, 'sku' | 'name' | 'handlingClass'>;
+
 export function ProductLineInput({
   products,
   value,
   onChange,
   onRemove,
 }: {
-  products: Product[];
+  products: readonly ProductOption[];
   value: SkuQuantity;
   onChange: (value: SkuQuantity) => void;
   onRemove?: () => void;
@@ -53,7 +56,7 @@ export function ProductLinesEditor({
   onChange,
   emptyText,
 }: {
-  products: Product[];
+  products: readonly ProductOption[];
   lines: SkuQuantity[];
   onChange: (lines: SkuQuantity[]) => void;
   emptyText: string;

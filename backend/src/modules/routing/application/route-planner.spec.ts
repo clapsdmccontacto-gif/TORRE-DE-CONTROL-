@@ -1,14 +1,14 @@
 import { DomainError } from '../../../common/domain-error.js';
 import { DEFAULT_FLEET } from '../../load-planning/infrastructure/default-fleet.js';
-import { DEMO_DEPOT, DEMO_ORDERS, DEMO_UNITS } from '../infrastructure/demo-network.js';
+import { DEMO_DEPOT, DEMO_ORDERS, DEMO_UNITS } from '../../../../test/fixtures/demo-network.js';
 import { RoutePlanner } from './route-planner.js';
 
 const planner = () =>
   new RoutePlanner({
-    depot: DEMO_DEPOT,
+    depot: () => DEMO_DEPOT,
     orders: () => DEMO_ORDERS,
     fleet: DEFAULT_FLEET,
-    units: DEMO_UNITS,
+    units: () => DEMO_UNITS,
   });
 
 describe('RoutePlanner', () => {
@@ -76,5 +76,23 @@ describe('RoutePlanner', () => {
     expect(() => p.applyRoadAdjustment(plan.id, route.unitPlate, adjustment)).toThrow(
       expect.objectContaining({ code: 'PLAN_PUBLICADO' }),
     );
+  });
+
+  it('pide bodega y camiones antes de planificar (la app parte vacía)', () => {
+    const empty = (depot: typeof DEMO_DEPOT | null, units: typeof DEMO_UNITS) =>
+      new RoutePlanner({
+        depot: () => depot,
+        orders: () => DEMO_ORDERS,
+        fleet: DEFAULT_FLEET,
+        units: () => units,
+      });
+    const input = { deliveryIds: ['NV-100231'], dieselPriceClp: 1_000 };
+    expect(() => empty(null, DEMO_UNITS).optimize(input)).toThrow(
+      expect.objectContaining({ code: 'SIN_BODEGA' }),
+    );
+    expect(() => empty(DEMO_DEPOT, []).optimize(input)).toThrow(
+      expect.objectContaining({ code: 'SIN_VEHICULOS' }),
+    );
+    expect(empty(DEMO_DEPOT, []).fleetUnits()).toEqual([]);
   });
 });

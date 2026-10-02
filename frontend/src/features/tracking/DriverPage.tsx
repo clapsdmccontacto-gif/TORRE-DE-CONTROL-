@@ -11,6 +11,37 @@ import { STOP_STATE_LABEL, formatKg } from '@/lib/format';
 import type { DriverSession, FleetUnitView, LiveDevice, PositionFix } from '@/types/api';
 
 const STORAGE_KEY = 'torre-control.driver-session';
+/** Nombre, teléfono y camión del conductor: quedan en su teléfono para la próxima vez. */
+const PROFILE_KEY = 'torre-control.driver-profile';
+
+interface DriverProfile {
+  driverName: string;
+  driverPhone: string;
+  plate: string;
+}
+
+function readProfile(): DriverProfile {
+  try {
+    const saved = JSON.parse(
+      localStorage.getItem(PROFILE_KEY) ?? 'null',
+    ) as Partial<DriverProfile> | null;
+    return {
+      driverName: saved?.driverName ?? '',
+      driverPhone: saved?.driverPhone ?? '',
+      plate: saved?.plate ?? '',
+    };
+  } catch {
+    return { driverName: '', driverPhone: '', plate: '' };
+  }
+}
+
+function saveProfile(profile: DriverProfile): void {
+  try {
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+  } catch {
+    // Sin almacenamiento: se vuelve a escribir la próxima vez.
+  }
+}
 const FLUSH_EVERY_MS = 5_000;
 
 type GpsState =
@@ -65,9 +96,11 @@ function toFix(position: GeolocationPosition): PositionFix {
 }
 
 export function DriverPage() {
-  const [units, setUnits] = useState<FleetUnitView[]>([]);
-  const [driverName, setDriverName] = useState('');
-  const [plate, setPlate] = useState('');
+  const [profile] = useState(readProfile);
+  const [units, setUnits] = useState<FleetUnitView[] | null>(null);
+  const [driverName, setDriverName] = useState(profile.driverName);
+  const [driverPhone, setDriverPhone] = useState(profile.driverPhone);
+  const [plate, setPlate] = useState(profile.plate);
   const [session, setSession] = useState<DriverSession | null>(readSaved);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,8 +118,10 @@ export function DriverPage() {
       .then((list) => {
         if (!active) return;
         setUnits(list);
-        setPlate(
-          (current) => current || list.find((u) => u.stops > 0)?.plate || list[0]?.plate || '',
+        setPlate((current) =>
+          list.some((u) => u.plate === current)
+            ? current
+            : list.find((u) => u.stops > 0)?.plate || list[0]?.plate || '',
         );
       })
       .catch((e: unknown) => active && setError(errorMessage(e)));
@@ -116,6 +151,25 @@ export function DriverPage() {
         lastRejection: result.rejected.at(-1)?.reason ?? s.lastRejection,
       }));
     } catch (e) {
+      if (e instanceof ApiError && e.body.code === 'SESION_DESCONOCIDA') {
+        // El servidor se reinició: se retoma la ruta sola y las lecturas no se pierden.
+        queueRef.current = [...batch, ...queueRef.current];
+        setPending(queueRef.current.length);
+        try {
+          const resumed = await api.startDriverSession({
+            driverName: session.driverName,
+            driverPhone: session.driverPhone,
+            vehiclePlate: session.vehiclePlate,
+          });
+          save(resumed);
+          setSession(resumed);
+        } catch (restartError) {
+          if (restartError instanceof ApiError && restartError.status === 422) {
+            stopRoute(errorMessage(restartError));
+          }
+        }
+        return;
+      }
       if (e instanceof ApiError && e.status === 422) {
         stopRoute(
           'La ruta ya no está activa (se cerró o la tomó otro teléfono). Iníciela de nuevo.',
@@ -194,7 +248,12 @@ export function DriverPage() {
     }
     setStarting(true);
     try {
-      const started = await api.startDriverSession({ driverName, vehiclePlate: plate });
+      const started = await api.startDriverSession({
+        driverName,
+        driverPhone: driverPhone.trim() || null,
+        vehiclePlate: plate,
+      });
+      saveProfile({ driverName, driverPhone, plate });
       save(started);
       setSent({ accepted: 0, lastRejection: null });
       setGps({ kind: 'waiting' });
@@ -246,23 +305,43 @@ export function DriverPage() {
               />
             </label>
             <label className="grid grid-cols-1 gap-1.5 text-sm">
-              <span className="font-medium">Vehículo</span>
-              <NativeSelect
-                id="driver-vehicle"
-                value={plate}
-                onChange={(e) => setPlate(e.target.value)}
+              <span className="font-medium">Teléfono (opcional, para que la torre lo llame)</span>
+              <Input
+                id="driver-phone"
+                type="tel"
+                autoComplete="tel"
+                inputMode="tel"
+                value={driverPhone}
+                onChange={(e) => setDriverPhone(e.target.value)}
+                placeholder="Ej.: +56 9 1234 5678"
                 className="h-11 text-base"
-              >
-                {units.map((u) => (
-                  <option key={u.plate} value={u.plate}>
-                    {u.plate} · {u.vehicleName} ·{' '}
-                    {u.stops === 0
-                      ? 'sin ruta asignada'
-                      : `${u.stops} ${u.stops === 1 ? 'parada asignada' : 'paradas asignadas'}`}
-                  </option>
-                ))}
-              </NativeSelect>
+              />
             </label>
+            {units !== null && units.length === 0 ? (
+              <StatusBanner status="warning" title="No hay camiones registrados">
+                Pida a la torre de control que agregue su camión en «Flota y bodega» y vuelva a
+                abrir esta pantalla.
+              </StatusBanner>
+            ) : (
+              <label className="grid grid-cols-1 gap-1.5 text-sm">
+                <span className="font-medium">Camión</span>
+                <NativeSelect
+                  id="driver-vehicle"
+                  value={plate}
+                  onChange={(e) => setPlate(e.target.value)}
+                  className="h-11 text-base"
+                >
+                  {(units ?? []).map((u) => (
+                    <option key={u.plate} value={u.plate}>
+                      {u.plate} · {u.vehicleName} ·{' '}
+                      {u.stops === 0
+                        ? 'sin ruta asignada'
+                        : `${u.stops} ${u.stops === 1 ? 'parada asignada' : 'paradas asignadas'}`}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </label>
+            )}
             <Button
               className="h-12 text-base"
               onClick={start}
@@ -273,8 +352,8 @@ export function DriverPage() {
             </Button>
             {apiMode === 'local' && (
               <p className="text-xs text-muted-foreground">
-                Modo demostración: la ubicación se ve en el mapa de este mismo dispositivo. Para que
-                la torre de control la vea desde otro equipo, use la app publicada con el servidor.
+                Esta versión no está conectada a un servidor: la ubicación sólo se ve en este mismo
+                teléfono. Para que la torre de control lo vea, abra la app desde el servidor.
               </p>
             )}
           </CardContent>

@@ -1,5 +1,5 @@
 import { DEFAULT_FLEET } from '../../load-planning/infrastructure/default-fleet.js';
-import { DEMO_ORDERS } from '../infrastructure/demo-network.js';
+import { DEMO_ORDERS } from '../../../../test/fixtures/demo-network.js';
 import { toDeliveryRequest } from './delivery.js';
 
 const order = (id: string) => DEMO_ORDERS.find((o) => o.id === id)!;

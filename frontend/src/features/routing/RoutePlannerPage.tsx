@@ -61,6 +61,7 @@ export function RoutePlannerPage() {
           ? publishedPlan.routes.flatMap((r) => r.stops.map((s) => s.deliveryId))
           : list.map((d) => d.id);
         setSelected(new Set(ids));
+        if (!publishedPlan && ids.length === 0) return;
         const result =
           publishedPlan ?? (await api.optimizeRoutes({ deliveryIds: ids, dieselPriceClp: 1_050 }));
         if (active) {
@@ -145,9 +146,18 @@ export function RoutePlannerPage() {
       <Card className="content-start">
         <CardHeader>
           <CardTitle>Pedidos a despachar</CardTitle>
-          <CardDescription>Entregas de mañana. Quite las que no salen hoy.</CardDescription>
+          <CardDescription>Quite los que no salen en este despacho.</CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-4">
+          {!pending && deliveries.length === 0 && (
+            <p className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
+              No hay pedidos por despachar. Agréguelos en{' '}
+              <a className="font-medium text-foreground underline" href="#obras">
+                Obras y pedidos
+              </a>
+              .
+            </p>
+          )}
           <ul className="grid grid-cols-1 gap-2">
             {deliveries.map((d) => (
               <li key={d.id}>
@@ -207,6 +217,14 @@ export function RoutePlannerPage() {
         {error && (
           <StatusBanner status="critical" title="No se pudo planificar">
             {error}
+            {error.includes('Flota y bodega') && (
+              <>
+                {' '}
+                <a className="font-medium text-foreground underline" href="#flota">
+                  Ir a Flota y bodega
+                </a>
+              </>
+            )}
           </StatusBanner>
         )}
         {plan && (

@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const startSessionSchema = z.object({
   driverName: z.string().trim().min(2).max(80),
+  driverPhone: z.string().trim().max(20).nullable().optional(),
   vehiclePlate: z.string().trim().min(1).max(20),
 });
 

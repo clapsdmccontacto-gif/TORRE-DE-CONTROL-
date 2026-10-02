@@ -1,6 +1,6 @@
 import { DomainError } from '../../../common/domain-error.js';
 import type { ProductLine } from '../../catalog/domain/product.js';
-import { DEMO_PRODUCTS } from '../../catalog/infrastructure/demo-products.js';
+import { DEMO_PRODUCTS } from '../../../../test/fixtures/demo-products.js';
 import { DEFAULT_CART_SPECS } from './cart.js';
 import { DEFAULT_MIX_POLICY, type MixPolicy } from './mix-policy.js';
 import { auditCart, checkCartAddition } from './mix-validator.js';

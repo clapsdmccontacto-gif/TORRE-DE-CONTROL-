@@ -37,11 +37,12 @@ export interface OptimizeInput {
 }
 
 export interface RoutePlannerDeps {
-  depot: { name: string; location: LatLng };
-  /** Pedidos pendientes de despacho (hoy, datos de demostración). */
+  /** Bodega de salida; null mientras la empresa no la marca en el mapa. */
+  depot: () => { name: string; location: LatLng } | null;
+  /** Pedidos pendientes de despacho (los carga la empresa en «Obras y pedidos»). */
   orders: () => readonly DeliveryOrder[];
   fleet: readonly VehicleType[];
-  units: readonly FleetUnit[];
+  units: () => readonly FleetUnit[];
   now?: () => number;
 }
 
@@ -62,14 +63,14 @@ export class RoutePlanner {
     this.deps = deps;
   }
 
-  get units(): readonly FleetUnit[] {
-    return this.deps.units;
+  units(): readonly FleetUnit[] {
+    return this.deps.units();
   }
 
   /** Vehículos que un conductor puede elegir, con las paradas que les asigna el plan publicado. */
   fleetUnits(): { plate: string; vehicleName: string; stops: number }[] {
     const plan = this.activePlan();
-    return this.deps.units.map((unit) => ({
+    return this.deps.units().map((unit) => ({
       plate: unit.plate,
       vehicleName: unit.vehicle.name,
       stops: plan?.routes.find((r) => r.unitPlate === unit.plate)?.stops.length ?? 0,
@@ -109,12 +110,23 @@ export class RoutePlanner {
       throw new DomainError('SIN_PEDIDOS', 'Seleccione al menos un pedido para planificar.');
     }
 
+    const depot = this.deps.depot();
+    if (!depot) {
+      throw new DomainError(
+        'SIN_BODEGA',
+        'Marque la bodega de salida en el mapa («Flota y bodega») antes de planificar.',
+      );
+    }
+    const units = this.deps.units();
+    if (units.length === 0) {
+      throw new DomainError('SIN_VEHICULOS', 'Agregue sus camiones en «Flota y bodega».');
+    }
     const result = optimizeRoutes(
       selected.map((o) => toDeliveryRequest(o, this.deps.fleet)),
-      this.deps.units,
+      units,
       {
         ...DEFAULT_ROUTING_OPTIONS,
-        depot: this.deps.depot.location,
+        depot: depot.location,
         dieselPriceClp: input.dieselPriceClp,
       },
     );
@@ -124,7 +136,7 @@ export class RoutePlanner {
       createdAt: new Date(this.now()).toISOString(),
       publishedAt: null,
       dieselPriceClp: input.dieselPriceClp,
-      depot: this.deps.depot,
+      depot,
     };
     this.plans.set(plan.id, plan);
     this.prune();
@@ -144,7 +156,7 @@ export class RoutePlanner {
       );
     }
     const route = plan.routes.find((r) => r.unitPlate === unitPlate);
-    const unit = this.deps.units.find((u) => u.plate === unitPlate);
+    const unit = this.deps.units().find((u) => u.plate === unitPlate);
     if (!route || !unit) {
       throw new DomainError('RUTA_DESCONOCIDA', `El plan no tiene una ruta para ${unitPlate}.`);
     }

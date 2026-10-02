@@ -1,6 +1,14 @@
 # Blueprint de Render: publica la Torre de Control (API + interfaz) con HTTPS, necesario
-# para que el GPS funcione en los teléfonos. En Render: New → Blueprint → este repositorio.
+# para que el GPS funcione en los teléfonos, y una base PostgreSQL gratuita donde quedan
+# guardados camiones, bodega, productos, obras y pedidos.
+# En Render: New → Blueprint → este repositorio → Apply.
 # La clave de acceso se genera sola: verla en el servicio → Environment → BASIC_AUTH_PASSWORD.
+databases:
+  - name: torre-control-db
+    plan: free
+    databaseName: torre_control
+    user: torre
+
 services:
   - type: web
     name: torre-control
@@ -10,8 +18,10 @@ services:
     plan: free
     healthCheckPath: /api/v1/health
     envVars:
-      - key: TRACKING_DEMO
-        value: "true"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: torre-control-db
+          property: connectionString
       - key: BASIC_AUTH_USER
         value: torre
       - key: BASIC_AUTH_PASSWORD

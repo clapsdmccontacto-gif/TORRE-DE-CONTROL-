@@ -5,7 +5,6 @@ import type { PlannedRoute } from '../domain/optimizer.js';
 import type { RoadAdjustment } from '../domain/road-adjustment.js';
 import { roadRouteFuelLiters, samplePath, type RoadRoute } from '../domain/road-route.js';
 import type { RoadRouter } from './road-router.port.js';
-import type { OptimizeInput, RoutePlan, RoutePlanner } from './route-planner.js';
 
 export interface RefinedRoute {
   unitPlate: string;
@@ -81,34 +80,4 @@ export function roadAdjustmentFrom(roadRoute: RoadRoute, stopOrder: number[]): R
     trafficDelayMin: roadRoute.trafficDelayMin,
     tollKm: roadRoute.tollKm,
   };
-}
-
-/**
- * Optimiza y deja cada ruta del plan (sin publicar) por las calles, en el orden del
- * optimizador: una consulta por ruta. Lo usa la demostración para que los camiones
- * simulados y el plan publicado sigan calles reales.
- */
-export async function optimizeWithStreets(
-  planner: RoutePlanner,
-  input: OptimizeInput,
-  router: RoadRouter,
-): Promise<RoutePlan> {
-  let plan = planner.optimize(input);
-  for (const route of plan.routes) {
-    const unit = planner.units.find((u) => u.plate === route.unitPlate);
-    if (!unit) continue;
-    const roadRoute = await router.route({
-      points: [plan.depot.location, ...route.stops.map((s) => s.location), plan.depot.location],
-      vehicle: unit.vehicle,
-      loadKg: route.loadKg,
-      optimizeOrder: false,
-      avoidTolls: false,
-    });
-    plan = planner.applyRoadAdjustment(
-      plan.id,
-      route.unitPlate,
-      roadAdjustmentFrom(roadRoute, roadRoute.stopOrder),
-    );
-  }
-  return plan;
 }

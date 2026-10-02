@@ -6,6 +6,7 @@ import request from 'supertest';
 import type { App } from 'supertest/types.js';
 import { AppModule } from '../src/app.module.js';
 import { configureApp } from '../src/app.setup.js';
+import { seedTestData } from './seed.js';
 
 describe('Rastreo y rutas (e2e)', () => {
   let app: INestApplication<App>;
@@ -14,6 +15,7 @@ describe('Rastreo y rutas (e2e)', () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = configureApp(moduleRef.createNestApplication()) as INestApplication<App>;
     await app.init();
+    await seedTestData(app);
   });
 
   afterAll(async () => {
@@ -84,7 +86,11 @@ describe('Rastreo y rutas (e2e)', () => {
 
     const session = await request(app.getHttpServer())
       .post('/api/v1/tracking/sessions')
-      .send({ driverName: 'María González', vehiclePlate: 'DEMO-02' })
+      .send({
+        driverName: 'María González',
+        driverPhone: '+56 9 8765 4321',
+        vehiclePlate: 'DEMO-02',
+      })
       .expect(201);
 
     const now = Date.now();
@@ -110,11 +116,11 @@ describe('Rastreo y rutas (e2e)', () => {
     );
     expect(device).toMatchObject({
       driverName: 'María González',
+      driverPhone: '+56 9 8765 4321',
       vehiclePlate: 'DEMO-02',
-      simulated: false,
     });
-    // Modo demostración activo: el resto de la flota aparece simulada.
-    expect(live.body.devices.some((d: { simulated: boolean }) => d.simulated)).toBe(true);
+    // Sin simulación: en el mapa sólo aparecen los teléfonos reales.
+    expect(live.body.devices).toHaveLength(1);
 
     const track = await request(app.getHttpServer())
       .get(`/api/v1/tracking/sessions/${session.body.id}/track`)
@@ -128,6 +134,12 @@ describe('Rastreo y rutas (e2e)', () => {
       .post(`/api/v1/tracking/sessions/${session.body.id}/positions`)
       .send({ fixes: [{ lat: -37.46, lng: -72.34, recordedAt: new Date().toISOString() }] })
       .expect(422);
+    // Una ruta que el servidor no conoce (se reinició) responde otro código: el teléfono la reanuda.
+    const unknown = await request(app.getHttpServer())
+      .post('/api/v1/tracking/sessions/RUTA-de-antes-del-reinicio/positions')
+      .send({ fixes: [{ lat: -37.46, lng: -72.34, recordedAt: new Date().toISOString() }] })
+      .expect(422);
+    expect(unknown.body.code).toBe('SESION_DESCONOCIDA');
   });
 
   it('valida las lecturas GPS', async () => {
@@ -142,6 +154,10 @@ describe('Rastreo y rutas (e2e)', () => {
   });
 
   it('transmite la flota en vivo por Server-Sent Events', async () => {
+    const session = await request(app.getHttpServer())
+      .post('/api/v1/tracking/sessions')
+      .send({ driverName: 'Luis Rojas', vehiclePlate: 'DEMO-03' })
+      .expect(201);
     const server = app.getHttpServer() as unknown as Server;
     await new Promise<void>((resolve) => server.listen(0, resolve));
     const { port } = server.address() as AddressInfo;
@@ -156,6 +172,9 @@ describe('Rastreo y rutas (e2e)', () => {
       .decode(value)
       .split('\n')
       .find((line) => line.startsWith('data: '));
-    expect(JSON.parse(dataLine!.slice('data: '.length)).devices.length).toBeGreaterThan(0);
+    const snapshot = JSON.parse(dataLine!.slice('data: '.length));
+    expect(snapshot.devices.map((d: { sessionId: string }) => d.sessionId)).toContain(
+      session.body.id,
+    );
   });
 });
