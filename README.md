@@ -380,9 +380,15 @@ llamar al cubicaje.
   *LLEGADA_OBRA* al entrar a 150 m y *SALIDA_OBRA* al salir (descarga terminada).
 - **Mapa en vivo** (`#mapa`): todos los vehículos en ruta con su estado (en movimiento,
   detenido, sin señal), trayecto recorrido, paradas pendientes, carga a bordo y feed de
-  eventos. Se actualiza por Server-Sent Events, sin recargar.
+  eventos. Se actualiza por Server-Sent Events, sin recargar. Al elegir un vehículo, *lo
+  que falta* (punteado) se dibuja por calles desde su posición, por sus obras pendientes y
+  de vuelta a la bodega (una consulta a TomTom al elegirlo y al terminar cada obra).
 - En modo demostración (`TRACKING_DEMO`, activo por defecto) camiones simulados recorren el
-  plan publicado; un conductor real reemplaza al simulado de su vehículo.
+  plan publicado **por las calles** (`tracking/domain/simulator.ts` corta el trazado en un
+  tramo por obra): al arrancar, el plan de ejemplo se calcula con TomTom (una consulta por
+  camión; en el navegador queda guardado 3 h en el equipo). Sin conexión o si TomTom no
+  responde en 8 s, se usan las rutas estimadas. Un conductor real reemplaza al simulado de
+  su vehículo y su trayecto es el de su GPS.
 
 Límite importante: el navegador del teléfono **sólo envía la ubicación con la app abierta en
 pantalla** (se pide mantener la pantalla encendida). El rastreo con el teléfono bloqueado o en
@@ -414,8 +420,9 @@ rutas (v1) calcula **rutas para camiones** (peso y carga por eje), con **tráfic
 tramos con peaje, congestión y obras, indicaciones en español y reordenamiento de paradas.
 Incluye 2.500 cálculos de ruta y 50.000 mosaicos de mapa por día.
 
-**Clave de la empresa:** viene **incluida en la app** (`frontend/src/components/map/basemaps.ts`,
-a pedido de la empresa), así que mapa, tráfico y rutas funcionan en cualquier equipo sin
+**Clave de la empresa:** viene **incluida en la app** (`COMPANY_TOMTOM_KEY` en
+`backend/src/modules/routing/infrastructure/tomtom.ts`, a pedido de la empresa; la usan la
+interfaz y el servidor), así que mapa, tráfico y rutas funcionan en cualquier equipo sin
 configurar nada y TomTom es el mapa base predeterminado. Es una clave de navegador: quien
 abra la app puede verla, y el cupo diario gratuito es compartido entre todos los equipos.
 
@@ -424,8 +431,8 @@ Para cambiarla (por ejemplo, si se agota el cupo o se quiere rotar):
 1. Entrar a [developer.tomtom.com](https://developer.tomtom.com/), iniciar sesión (o
    registrarse con el correo de la empresa; no pide tarjeta) y abrir **Keys** en el panel.
 2. Crear o copiar una clave.
-3. Reemplazarla en `basemaps.ts` (o compilar con `VITE_TOMTOM_KEY=…`; vacía = sin clave
-   incluida). Un equipo puntual también puede usar otra: *Mapa base* → *Clave de TomTom* →
+3. Reemplazarla en `tomtom.ts` (o compilar la interfaz con `VITE_TOMTOM_KEY=…` y dar al
+   servidor `TOMTOM_API_KEY=…`; vacías = sin clave). Un equipo puntual también puede usar otra: *Mapa base* → *Clave de TomTom* →
    pegarla → **Probar clave** (queda sólo en ese equipo).
 
 Los conductores no la necesitan: navegan con Waze o Google Maps.
@@ -506,7 +513,8 @@ hablar con el mismo servidor. El repositorio trae la imagen (`torre-control/Dock
 
 Notas: el plan gratuito de Render duerme tras un rato sin uso (la primera visita tarda) y el
 estado vive en memoria hasta conectar PostgreSQL (fase 2), así que se reinicia con cada
-despliegue. Para operar sin camiones simulados: `TRACKING_DEMO=false`. Cualquier servicio que
+despliegue. Para operar sin camiones simulados: `TRACKING_DEMO=false`. El servidor usa la
+clave de TomTom de la empresa para el plan de demostración (`TOMTOM_API_KEY` la reemplaza). Cualquier servicio que
 ejecute Docker sirve igual (Railway, Fly.io, un VPS).
 
 ### Abrir desde el celular o el computador

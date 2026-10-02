@@ -10,6 +10,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { remainingPath } from '@core/modules/routing/domain/road-route';
 import { useTomTomKey } from '@/components/map/basemaps';
 import {
   LOS_ANGELES_CENTER,
@@ -36,6 +37,7 @@ import { api, apiMode, errorMessage } from '@/lib/api';
 import { STOP_STATE_LABEL, formatClock, formatKg, formatKm } from '@/lib/format';
 import {
   ROUTING_VEHICLES,
+  remainingStreetRoute,
   roadsideFeatures,
   streetRoute,
   vehicleCodeFor,
@@ -586,6 +588,45 @@ function LiveFleetMap({
     };
   }, [layerRef, depot]);
 
+  // Lo que falta, por calles (TomTom): se consulta al elegir el vehículo y cada vez que
+  // termina una obra; entre lecturas GPS sólo se recorta desde la posición actual.
+  const hasKey = useTomTomKey() !== '';
+  const pendingStops = selected?.stops.filter((s) => s.state !== 'COMPLETADA') ?? [];
+  const remainingKey =
+    hasKey && selected?.position && depot && pendingStops.length > 0
+      ? `${selected.sessionId}|${pendingStops.map((s) => s.deliveryId).join(',')}`
+      : '';
+  const [streetRemaining, setStreetRemaining] = useState<{
+    key: string;
+    path: LatLng[];
+  } | null>(null);
+  const selectedRef = useRef(selected);
+  useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
+  useEffect(() => {
+    const device = selectedRef.current;
+    if (!remainingKey || !device?.position || !depot) return;
+    let active = true;
+    remainingStreetRoute({
+      origin: device.position,
+      stops: device.stops.filter((s) => s.state !== 'COMPLETADA').map((s) => s.location),
+      depot: depot.location,
+      vehicleCode: vehicleCodeFor(device.vehicleName),
+      loadKg: device.cargoWeightKg,
+    }).then(
+      (route) => {
+        if (active) setStreetRemaining({ key: remainingKey, path: route.path });
+      },
+      () => undefined, // Sin conexión o sin cupo: queda la línea estimada.
+    );
+    return () => {
+      active = false;
+    };
+  }, [remainingKey, depot]);
+  const streetRemainingPath =
+    streetRemaining && streetRemaining.key === remainingKey ? streetRemaining.path : null;
+
   // Trayecto recorrido (línea) y lo que falta (punteado) del vehículo elegido.
   const trackLineRef = useRef<L.Polyline | null>(null);
   const plannedLineRef = useRef<L.Polyline | null>(null);
@@ -605,15 +646,17 @@ function LiveFleetMap({
     upsert(trackLineRef, selected ? trackFixes : [], 'route-1');
     const remaining = selected?.stops.filter((s) => s.state !== 'COMPLETADA') ?? [];
     const planned =
-      selected?.position && remaining.length > 0
-        ? [
-            selected.position,
-            ...remaining.map((s) => s.location),
-            ...(depot ? [depot.location] : []),
-          ]
-        : [];
+      !selected?.position || remaining.length === 0
+        ? []
+        : streetRemainingPath
+          ? remainingPath(streetRemainingPath, selected.position)
+          : [
+              selected.position,
+              ...remaining.map((s) => s.location),
+              ...(depot ? [depot.location] : []),
+            ];
     upsert(plannedLineRef, planned, 'route-planned');
-  }, [layerRef, selected, trackFixes, depot]);
+  }, [layerRef, selected, trackFixes, depot, streetRemainingPath]);
 
   // Paradas del vehículo elegido: se redibujan sólo si cambia su estado.
   const stopsKey = selected

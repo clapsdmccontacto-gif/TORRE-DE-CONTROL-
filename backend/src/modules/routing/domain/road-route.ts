@@ -141,6 +141,24 @@ export function clusterPoints(points: readonly LatLng[], radiusM: number): LatLn
   return clusters.map((c) => c.center);
 }
 
+/**
+ * Lo que falta de un trazado visto desde la posición actual: desde el punto más cercano
+ * en adelante. Para dibujar la ruta restante sin volver a consultar a cada lectura GPS.
+ */
+export function remainingPath(path: readonly LatLng[], position: LatLng): LatLng[] {
+  if (path.length === 0) return [];
+  let nearest = 0;
+  let best = Infinity;
+  path.forEach((point, i) => {
+    const d = distanceMeters(point, position);
+    if (d < best) {
+      best = d;
+      nearest = i;
+    }
+  });
+  return [position, ...path.slice(nearest + 1)];
+}
+
 /** Largo de un trazado en km. */
 export function pathKm(path: readonly LatLng[]): number {
   let meters = 0;

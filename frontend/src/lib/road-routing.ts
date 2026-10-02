@@ -59,6 +59,26 @@ export async function roadsideFeatures(path: readonly LatLng[]): Promise<Roadsid
 }
 
 /**
+ * Lo que le falta a un vehículo en ruta: desde su posición, por sus obras pendientes y de
+ * vuelta a la bodega, por calles.
+ */
+export async function remainingStreetRoute(input: {
+  origin: LatLng;
+  stops: LatLng[];
+  depot: LatLng;
+  vehicleCode: string;
+  loadKg: number;
+}): Promise<RoadRoute> {
+  return router().route({
+    points: [input.origin, ...input.stops, input.depot],
+    vehicle: vehicleByCode(input.vehicleCode) ?? DEFAULT_FLEET[1],
+    loadKg: input.loadKg,
+    optimizeOrder: false,
+    avoidTolls: false,
+  });
+}
+
+/**
  * Ajusta una ruta del plan con calles y tráfico reales (orden que gasta menos diésel) y
  * guarda el resultado en el plan.
  */

@@ -3,14 +3,44 @@ import type { PositionFix } from './tracking.js';
 
 /**
  * Viaje simulado para demostraciones: recorre bodega → obras → bodega a velocidad
- * constante, detenido `dwellMinutes` en cada obra. Al terminar queda en la bodega.
+ * constante siguiendo el trazado (por calles si la ruta fue ajustada), detenido
+ * `dwellMinutes` en cada obra. Al terminar queda en la bodega.
  */
 export interface SimulatedTrip {
-  /** Bodega, obras en orden de visita y bodega otra vez. */
-  path: readonly LatLng[];
+  /** Tramos bodega → obra → … → bodega; cada uno es un trazado de dos o más puntos. */
+  legs: readonly (readonly LatLng[])[];
   speedKmh: number;
   dwellMinutes: number;
   startedAtMs: number;
+}
+
+/** Tolerancia para elegir la primera pasada del trazado junto a una obra. */
+const STOP_MATCH_SLACK_M = 30;
+
+/**
+ * Corta el trazado de una ruta (bodega → obras → bodega) en un tramo por obra. Sirve para
+ * la línea recta del plan estimado y para el trazado por calles, que no trae los cortes.
+ */
+export function tripLegs(path: readonly LatLng[], stops: readonly LatLng[]): LatLng[][] {
+  if (path.length < 2) return [];
+  const legs: LatLng[][] = [];
+  let from = 0;
+  let leg: LatLng[] = [path[0]];
+  for (const stop of stops) {
+    let best = Infinity;
+    for (let i = from; i < path.length; i++) best = Math.min(best, distanceMeters(path[i], stop));
+    // La primera vez que el trazado pasa junto a la obra (una ruta puede volver por la misma calle).
+    let at = from;
+    while (distanceMeters(path[at], stop) > best + STOP_MATCH_SLACK_M) at++;
+    leg.push(...path.slice(from + 1, at + 1));
+    if (distanceMeters(leg.at(-1)!, stop) > 1) leg.push(stop);
+    legs.push(leg);
+    leg = [stop];
+    from = at;
+  }
+  leg.push(...path.slice(from + 1));
+  legs.push(leg);
+  return legs;
 }
 
 interface Phase {
@@ -24,19 +54,23 @@ interface Phase {
 function phases(trip: SimulatedTrip): Phase[] {
   const result: Phase[] = [];
   let t = trip.startedAtMs;
-  for (let i = 0; i < trip.path.length - 1; i++) {
-    const from = trip.path[i];
-    const to = trip.path[i + 1];
-    const travelMs = (distanceMeters(from, to) / 1000 / trip.speedKmh) * 3_600_000;
-    result.push({ from, to, startMs: t, endMs: t + travelMs, moving: true });
-    t += travelMs;
-    const isIntermediateStop = i + 1 < trip.path.length - 1;
-    if (isIntermediateStop) {
+  trip.legs.forEach((leg, legIndex) => {
+    for (let i = 0; i < leg.length - 1; i++) {
+      const from = leg[i];
+      const to = leg[i + 1];
+      const travelMs = (distanceMeters(from, to) / 1000 / trip.speedKmh) * 3_600_000;
+      if (travelMs === 0) continue;
+      result.push({ from, to, startMs: t, endMs: t + travelMs, moving: true });
+      t += travelMs;
+    }
+    // Descarga en cada obra (todas menos el regreso a bodega).
+    if (legIndex < trip.legs.length - 1) {
+      const at = leg.at(-1)!;
       const dwellMs = trip.dwellMinutes * 60_000;
-      result.push({ from: to, to, startMs: t, endMs: t + dwellMs, moving: false });
+      result.push({ from: at, to: at, startMs: t, endMs: t + dwellMs, moving: false });
       t += dwellMs;
     }
-  }
+  });
   return result;
 }
 
@@ -49,7 +83,7 @@ export function simulatedTripDurationMs(trip: SimulatedTrip): number {
 export function simulatePosition(trip: SimulatedTrip, atMs: number): PositionFix {
   const all = phases(trip);
   const recordedAt = new Date(atMs).toISOString();
-  const first = trip.path[0];
+  const first = trip.legs[0]?.[0] ?? { lat: 0, lng: 0 };
   if (all.length === 0 || atMs <= trip.startedAtMs) {
     return { ...first, accuracyM: 8, speedKmh: 0, headingDeg: null, recordedAt };
   }

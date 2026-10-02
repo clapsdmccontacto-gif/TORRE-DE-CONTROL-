@@ -6,6 +6,7 @@ import {
   clusterPoints,
   navigationLinks,
   pathKm,
+  remainingPath,
   roadRouteFuelLiters,
   samplePath,
   truckProfile,
@@ -88,4 +89,16 @@ it('navigationLinks arma enlaces de Waze y Google Maps al destino', () => {
   const links = navigationLinks({ lat: -37.4693, lng: -72.3527 });
   expect(links.waze).toBe('https://waze.com/ul?ll=-37.469300,-72.352700&navigate=yes');
   expect(links.googleMaps).toContain('destination=-37.469300,-72.352700');
+});
+
+it('remainingPath parte en la posición actual y sigue desde el punto más cercano', () => {
+  const path = [
+    { lat: -37.0, lng: -72.0 },
+    { lat: -37.0, lng: -72.1 },
+    { lat: -37.1, lng: -72.1 },
+    { lat: -37.1, lng: -72.2 },
+  ];
+  const position = { lat: -37.001, lng: -72.098 };
+  expect(remainingPath(path, position)).toEqual([position, path[2], path[3]]);
+  expect(remainingPath([], position)).toEqual([]);
 });

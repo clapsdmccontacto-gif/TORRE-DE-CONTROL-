@@ -8,6 +8,7 @@ import {
   simulatePosition,
   simulateTrack,
   simulatedTripDurationMs,
+  tripLegs,
   type SimulatedTrip,
 } from '../domain/simulator.js';
 import {
@@ -119,6 +120,8 @@ const MAX_EVENTS = 200;
 const SNAPSHOT_EVENTS = 30;
 const SIMULATED_SPEED_KMH = 45;
 const SIMULATED_DWELL_MIN = 20;
+/** Historial inicial de los camiones simulados: cada ~125 m, para que siga las curvas. */
+const SIMULATED_HISTORY_EVERY_SEC = 10;
 
 /**
  * Caso de uso "rastrear la flota": sesiones de conductores, lecturas GPS, avance de
@@ -208,7 +211,10 @@ export class TrackingHub {
       );
       if (takenByDriver) return;
       const trip: SimulatedTrip = {
-        path: route.path,
+        legs: tripLegs(
+          route.path,
+          route.stops.map((stop) => stop.location),
+        ),
         speedKmh: SIMULATED_SPEED_KMH,
         dwellMinutes: SIMULATED_DWELL_MIN,
         startedAtMs: 0,
@@ -223,7 +229,7 @@ export class TrackingHub {
         true,
         trip,
       );
-      this.apply(state, simulateTrack(trip, now, 30));
+      this.apply(state, simulateTrack(trip, now, SIMULATED_HISTORY_EVERY_SEC));
     });
     this.notify();
   }

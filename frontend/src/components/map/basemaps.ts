@@ -1,3 +1,4 @@
+import { COMPANY_TOMTOM_KEY as BUILT_IN_KEY } from '@core/modules/routing/infrastructure/tomtom';
 import { useSyncExternalStore } from 'react';
 
 /**
@@ -48,13 +49,10 @@ const CUSTOM = env.VITE_MAP_TILE_URL
   : null;
 
 /**
- * Clave de TomTom de Constructor Center, incluida a pedido de la empresa para que mapa,
- * tráfico y rutas funcionen en todos los equipos sin configurar nada. Es una clave de
- * navegador (plan gratuito, sin tarjeta): quien use la app puede verla. Para cambiarla,
- * crear otra en developer.tomtom.com → Keys y reemplazarla aquí, o compilar con
- * VITE_TOMTOM_KEY (vacía = sin clave incluida).
+ * Clave de TomTom de la empresa (definida en `routing/infrastructure/tomtom.ts`, la
+ * comparte el servidor). VITE_TOMTOM_KEY la reemplaza al compilar; vacía = sin clave.
  */
-const COMPANY_TOMTOM_KEY = (env.VITE_TOMTOM_KEY ?? '66qzlnRDJMzyCIACdNvHPuujLrRuEYGc').trim();
+const COMPANY_TOMTOM_KEY = (env.VITE_TOMTOM_KEY ?? BUILT_IN_KEY).trim();
 export const HAS_COMPANY_TOMTOM_KEY = COMPANY_TOMTOM_KEY !== '';
 
 /** Clave efectiva: la propia de este equipo o, si no hay, la de la empresa. */

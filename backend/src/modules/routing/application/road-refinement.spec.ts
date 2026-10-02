@@ -1,7 +1,9 @@
 import { DEFAULT_FLEET } from '../../load-planning/infrastructure/default-fleet.js';
 import type { PlannedRoute, PlannedStop } from '../domain/optimizer.js';
 import type { RoadRoute, RoadRouteRequest } from '../domain/road-route.js';
-import { refineWithRoads, toRoadAdjustment } from './road-refinement.js';
+import { DEMO_DEPOT, DEMO_ORDERS, DEMO_UNITS } from '../infrastructure/demo-network.js';
+import { optimizeWithStreets, refineWithRoads, toRoadAdjustment } from './road-refinement.js';
+import { RoutePlanner } from './route-planner.js';
 import type { RoadRouter } from './road-router.port.js';
 
 const truck = DEFAULT_FLEET.find((v) => v.code === 'CAMION_3_4')!;
@@ -127,4 +129,37 @@ it('toRoadAdjustment reduce el trazado para guardarlo en el plan', async () => {
   expect(adjustment.path[0]).toEqual(long.path[0]);
   expect(adjustment.legs).toBe(long.legs);
   expect(adjustment.stopOrder).toEqual([0]);
+});
+
+it('optimizeWithStreets deja todas las rutas del plan por calles, una consulta por ruta', async () => {
+  const planner = new RoutePlanner({
+    depot: DEMO_DEPOT,
+    orders: () => DEMO_ORDERS,
+    fleet: DEFAULT_FLEET,
+    units: DEMO_UNITS,
+  });
+  const requests: RoadRouteRequest[] = [];
+  const router: RoadRouter = {
+    route: async (request) => {
+      requests.push(request);
+      const stops = request.points.length - 2;
+      return {
+        ...roadRoute(
+          Array.from({ length: stops + 1 }, () => 5),
+          Array.from({ length: stops }, (_, i) => i),
+        ),
+        path: request.points,
+      };
+    },
+  };
+  const plan = await optimizeWithStreets(
+    planner,
+    { deliveryIds: DEMO_ORDERS.map((o) => o.id), dieselPriceClp: 1_000 },
+    router,
+  );
+  expect(requests).toHaveLength(plan.routes.length);
+  expect(requests.every((r) => !r.optimizeOrder)).toBe(true);
+  expect(plan.publishedAt).toBeNull();
+  expect(plan.routes.every((r) => r.road !== null)).toBe(true);
+  expect(plan.routes[0].distanceKm).toBe(5 * (plan.routes[0].stops.length + 1));
 });

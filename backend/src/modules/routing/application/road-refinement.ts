@@ -5,6 +5,7 @@ import type { PlannedRoute } from '../domain/optimizer.js';
 import type { RoadAdjustment } from '../domain/road-adjustment.js';
 import { roadRouteFuelLiters, samplePath, type RoadRoute } from '../domain/road-route.js';
 import type { RoadRouter } from './road-router.port.js';
+import type { OptimizeInput, RoutePlan, RoutePlanner } from './route-planner.js';
 
 export interface RefinedRoute {
   unitPlate: string;
@@ -65,15 +66,49 @@ const MAX_PLAN_PATH_POINTS = 800;
 
 /** Datos para aplicar la ruta por calles al plan (`RoutePlanner.applyRoadAdjustment`). */
 export function toRoadAdjustment(refined: RefinedRoute): RoadAdjustment {
+  return roadAdjustmentFrom(refined.roadRoute, refined.stopOrder);
+}
+
+export function roadAdjustmentFrom(roadRoute: RoadRoute, stopOrder: number[]): RoadAdjustment {
   const round = (v: number) => Math.round(v * 1e6) / 1e6;
   return {
-    stopOrder: refined.stopOrder,
-    legs: refined.roadRoute.legs,
-    path: samplePath(refined.roadRoute.path, MAX_PLAN_PATH_POINTS).map((p) => ({
+    stopOrder,
+    legs: roadRoute.legs,
+    path: samplePath(roadRoute.path, MAX_PLAN_PATH_POINTS).map((p) => ({
       lat: round(p.lat),
       lng: round(p.lng),
     })),
-    trafficDelayMin: refined.roadRoute.trafficDelayMin,
-    tollKm: refined.roadRoute.tollKm,
+    trafficDelayMin: roadRoute.trafficDelayMin,
+    tollKm: roadRoute.tollKm,
   };
+}
+
+/**
+ * Optimiza y deja cada ruta del plan (sin publicar) por las calles, en el orden del
+ * optimizador: una consulta por ruta. Lo usa la demostración para que los camiones
+ * simulados y el plan publicado sigan calles reales.
+ */
+export async function optimizeWithStreets(
+  planner: RoutePlanner,
+  input: OptimizeInput,
+  router: RoadRouter,
+): Promise<RoutePlan> {
+  let plan = planner.optimize(input);
+  for (const route of plan.routes) {
+    const unit = planner.units.find((u) => u.plate === route.unitPlate);
+    if (!unit) continue;
+    const roadRoute = await router.route({
+      points: [plan.depot.location, ...route.stops.map((s) => s.location), plan.depot.location],
+      vehicle: unit.vehicle,
+      loadKg: route.loadKg,
+      optimizeOrder: false,
+      avoidTolls: false,
+    });
+    plan = planner.applyRoadAdjustment(
+      plan.id,
+      route.unitPlate,
+      roadAdjustmentFrom(roadRoute, roadRoute.stopOrder),
+    );
+  }
+  return plan;
 }
