@@ -33,6 +33,13 @@ const clock = new Intl.DateTimeFormat('es-CL', {
 });
 export const formatClock = (iso: string) => clock.format(new Date(iso));
 
+/** 45 min · 1 h 05 min */
+export function formatDuration(minutes: number): string {
+  const total = Math.max(0, Math.round(minutes));
+  if (total < 60) return `${total} min`;
+  return `${Math.floor(total / 60)} h ${String(total % 60).padStart(2, '0')} min`;
+}
+
 /** Hora estimada a partir de los minutos desde la salida de bodega (08:00 por defecto). */
 export function formatPlannedTime(minutesFromDeparture: number, departure = '08:00'): string {
   const [h, m] = departure.split(':').map(Number);

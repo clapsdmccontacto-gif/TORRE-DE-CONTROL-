@@ -2,6 +2,7 @@
 // desde OpenAPI o moverlos a un paquete compartido para que no diverjan.
 
 import type { DeliveryView, RoutePlan } from '@core/modules/routing/application/route-planner';
+import type { RoadAdjustment } from '@core/modules/routing/domain/road-adjustment';
 import type { PositionFix } from '@core/modules/tracking/domain/tracking';
 import type {
   DriverSession,
@@ -124,7 +125,20 @@ export interface MixCheckRequest {
 
 // --- Rutas y rastreo: mismos tipos que el backend (alias @core), sin copiarlos ---------
 export type { LatLng } from '@core/common/geo';
-export type { PlannedRoute, PlannedStop, PlanTotals } from '@core/modules/routing/domain/optimizer';
+export type {
+  PlannedRoute,
+  PlannedStop,
+  PlanTotals,
+  RoadSummary,
+} from '@core/modules/routing/domain/optimizer';
+export type { RoadAdjustment } from '@core/modules/routing/domain/road-adjustment';
+export type {
+  RoadInstruction,
+  RoadRoute,
+  RoadsideFeatures,
+  TrafficSeverity,
+  TrafficSpan,
+} from '@core/modules/routing/domain/road-route';
 export type { DeliveryView, RoutePlan } from '@core/modules/routing/application/route-planner';
 export type { DeviceStatus, PositionFix, StopState } from '@core/modules/tracking/domain/tracking';
 export type {
@@ -158,6 +172,12 @@ export interface TorreApi {
 
   deliveries(): Promise<DeliveryView[]>;
   optimizeRoutes(request: { deliveryIds: string[]; dieselPriceClp: number }): Promise<RoutePlan>;
+  /** Aplica a una ruta del plan (sin publicar) el recorrido por calles con tráfico. */
+  applyRoadAdjustment(
+    planId: string,
+    unitPlate: string,
+    adjustment: RoadAdjustment,
+  ): Promise<RoutePlan>;
   publishPlan(planId: string): Promise<RoutePlan>;
   activePlan(): Promise<RoutePlan | null>;
 

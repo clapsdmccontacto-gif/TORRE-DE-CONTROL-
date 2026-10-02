@@ -6,9 +6,11 @@ import { toDeliveryRequest, type DeliveryOrder } from '../domain/delivery.js';
 import {
   DEFAULT_ROUTING_OPTIONS,
   optimizeRoutes,
+  planTotals,
   type FleetUnit,
   type OptimizationResult,
 } from '../domain/optimizer.js';
+import { applyRoadAdjustment, type RoadAdjustment } from '../domain/road-adjustment.js';
 
 export interface DeliveryView {
   id: string;
@@ -129,11 +131,35 @@ export class RoutePlanner {
     return plan;
   }
 
+  /**
+   * Aplica a una ruta del plan el recorrido por calles con tráfico (orden, trazado, km y
+   * diésel). Sólo antes de publicar: los conductores reciben el plan ya ajustado.
+   */
+  applyRoadAdjustment(planId: string, unitPlate: string, adjustment: RoadAdjustment): RoutePlan {
+    const plan = this.plan(planId);
+    if (plan.publishedAt) {
+      throw new DomainError(
+        'PLAN_PUBLICADO',
+        'El plan ya fue publicado a la flota; optimice de nuevo para ajustarlo.',
+      );
+    }
+    const route = plan.routes.find((r) => r.unitPlate === unitPlate);
+    const unit = this.deps.units.find((u) => u.plate === unitPlate);
+    if (!route || !unit) {
+      throw new DomainError('RUTA_DESCONOCIDA', `El plan no tiene una ruta para ${unitPlate}.`);
+    }
+    const routes = plan.routes.map((r) =>
+      r === route ? applyRoadAdjustment(r, adjustment, unit.vehicle, plan.dieselPriceClp) : r,
+    );
+    // El ahorro frente al despacho en orden de llegada sigue comparando estimaciones.
+    const adjusted: RoutePlan = { ...plan, routes, totals: planTotals(routes) };
+    this.plans.set(planId, adjusted);
+    return adjusted;
+  }
+
   /** Publica el plan a la flota: los conductores lo ven al iniciar su ruta. */
   publish(planId: string): RoutePlan {
-    const plan = this.plans.get(planId);
-    if (!plan)
-      throw new DomainError('PLAN_DESCONOCIDO', 'El plan no existe o expiró; optimice de nuevo.');
+    const plan = this.plan(planId);
     const published = { ...plan, publishedAt: new Date(this.now()).toISOString() };
     this.plans.set(planId, published);
     this.activeId = planId;
@@ -148,6 +174,13 @@ export class RoutePlanner {
   onPublish(listener: (plan: RoutePlan) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  private plan(planId: string): RoutePlan {
+    const plan = this.plans.get(planId);
+    if (!plan)
+      throw new DomainError('PLAN_DESCONOCIDO', 'El plan no existe o expiró; optimice de nuevo.');
+    return plan;
   }
 
   private now(): number {

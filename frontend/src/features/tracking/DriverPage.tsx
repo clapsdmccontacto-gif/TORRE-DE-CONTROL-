@@ -1,7 +1,8 @@
-import { LoaderCircle, LocateFixed, Square } from 'lucide-react';
+import { navigationLinks } from '@core/modules/routing/domain/road-route';
+import { ExternalLink, LoaderCircle, LocateFixed, Navigation, Square } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusBanner, StatusLabel } from '@/components/status';
-import { Button } from '@/components/ui/button';
+import { Button, LinkButton } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input, NativeSelect } from '@/components/ui/input';
 import { api, apiMode, errorMessage } from '@/lib/api';
@@ -307,12 +308,15 @@ export function DriverPage() {
                 <CardDescription>Próxima obra</CardDescription>
                 <CardTitle className="text-xl">{device.nextStop.siteName}</CardTitle>
               </CardHeader>
-              <CardContent className="text-sm text-muted-foreground">
-                {device.nextStop.etaMin === 0
-                  ? 'En la obra. Al salir se marca la descarga como terminada.'
-                  : device.nextStop.etaMin !== null
-                    ? `Llegada estimada en ${device.nextStop.etaMin} min. Se avisa al capataz 15 min antes.`
-                    : 'Esperando la primera lectura del GPS para estimar la llegada.'}
+              <CardContent className="grid grid-cols-1 gap-3 text-sm">
+                <p className="text-muted-foreground">
+                  {device.nextStop.etaMin === 0
+                    ? 'En la obra. Al salir se marca la descarga como terminada.'
+                    : device.nextStop.etaMin !== null
+                      ? `Llegada estimada en ${device.nextStop.etaMin} min. Se avisa al capataz 15 min antes.`
+                      : 'Esperando la primera lectura del GPS para estimar la llegada.'}
+                </p>
+                <NavigateButtons device={device} />
               </CardContent>
             </Card>
           )}
@@ -376,4 +380,30 @@ function GpsStatus({
   }
   if (gps.kind === 'error') return <StatusLabel status="critical">{gps.message}</StatusLabel>;
   return <StatusLabel status="warning">Buscando señal GPS…</StatusLabel>;
+}
+
+/**
+ * Navegación por voz a la próxima obra con la app del teléfono. Al volver a esta pestaña
+ * el GPS sigue enviando; mientras Waze o Maps estén al frente, el navegador puede pausarlo.
+ */
+function NavigateButtons({ device }: { device: LiveDevice }) {
+  const next = device.stops.find((s) => s.state !== 'COMPLETADA');
+  if (!next) return null;
+  const links = navigationLinks(next.location);
+  return (
+    <div className="grid gap-2">
+      <div className="flex flex-wrap gap-2">
+        <LinkButton href={links.waze} target="_blank" rel="noreferrer">
+          <Navigation /> Navegar con Waze
+        </LinkButton>
+        <LinkButton href={links.googleMaps} target="_blank" rel="noreferrer" variant="outline">
+          <ExternalLink /> Google Maps
+        </LinkButton>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Mientras navega con otra app el teléfono puede pausar el envío de ubicación: vuelva a esta
+        pantalla al llegar a la obra.
+      </p>
+    </div>
+  );
 }

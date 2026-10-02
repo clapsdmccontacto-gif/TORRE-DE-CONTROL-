@@ -13,6 +13,8 @@ function isDarkTheme(): boolean {
 
 export const LOS_ANGELES_CENTER: LatLng = { lat: -37.47, lng: -72.35 };
 
+const TRAFFIC_REFRESH_MS = 5 * 60_000;
+
 export const toLeaflet = (p: LatLng): L.LatLngTuple => [p.lat, p.lng];
 
 /**
@@ -37,24 +39,36 @@ export function useLeafletMap(containerRef: RefObject<HTMLDivElement | null>, zo
     // Mapa base según el proveedor elegido y el tema (claro u oscuro). Se reemplaza en el
     // lugar cuando cambia cualquiera de los dos, sin recrear el mapa.
     let baseLayers: L.TileLayer[] = [];
+    let overlays: L.TileLayer[] = [];
     let failedTiles = 0;
     const applyBasemap = () => {
-      for (const layer of baseLayers) layer.remove();
+      for (const layer of [...baseLayers, ...overlays]) layer.remove();
       failedTiles = 0;
-      baseLayers = basemapLayers(getBasemap(), isDarkTheme()).map((spec) =>
-        L.tileLayer(spec.url, {
+      baseLayers = [];
+      overlays = [];
+      for (const spec of basemapLayers(getBasemap(), isDarkTheme())) {
+        const layer = L.tileLayer(spec.url, {
           maxZoom: 19,
           maxNativeZoom: spec.maxNativeZoom,
           attribution: spec.attribution,
           referrerPolicy: 'strict-origin-when-cross-origin',
-        })
-          .on('tileerror', () => {
+          className: spec.overlay ? 'traffic-tiles' : '',
+        }).addTo(map);
+        if (spec.overlay) {
+          overlays.push(layer);
+        } else {
+          layer.on('tileerror', () => {
             failedTiles++;
             if (failedTiles === 3) setBaseMapAvailable(false);
-          })
-          .addTo(map),
-      );
+          });
+          baseLayers.push(layer);
+        }
+      }
     };
+    // El tráfico cambia: la capa se vuelve a pedir cada pocos minutos.
+    const trafficTimer = setInterval(() => {
+      for (const layer of overlays) layer.redraw();
+    }, TRAFFIC_REFRESH_MS);
     const reapply = () => {
       setBaseMapAvailable(true);
       applyBasemap();
@@ -71,6 +85,7 @@ export function useLeafletMap(containerRef: RefObject<HTMLDivElement | null>, zo
     const resize = new ResizeObserver(() => map.invalidateSize());
     resize.observe(container);
     return () => {
+      clearInterval(trafficTimer);
       resize.disconnect();
       unsubscribe();
       media.removeEventListener('change', reapply);
@@ -145,4 +160,56 @@ export function routeClass(index: number): string {
 
 export function routeLetter(index: number): string {
   return String.fromCharCode(65 + (index % 26));
+}
+
+// --- Ruta por calles -------------------------------------------------------------
+
+/** Tramos con peaje: borde ancho debajo de la línea de la ruta. */
+export function tollLine(path: readonly LatLng[]): L.Polyline {
+  return L.polyline(path.map(toLeaflet), { className: 'toll-line', interactive: true }).bindTooltip(
+    el('span', '', 'Tramo con peaje'),
+    { sticky: true },
+  );
+}
+
+/** Congestión, obras o cierre sobre la ruta (el detalle con ícono y texto va en el panel). */
+export function trafficLine(
+  path: readonly LatLng[],
+  severity: 'LEVE' | 'MODERADA' | 'ALTA' | 'CERRADO',
+  tooltip: string,
+): L.Polyline {
+  const level = severity === 'ALTA' || severity === 'CERRADO' ? 'is-critical' : 'is-warning';
+  return L.polyline(path.map(toLeaflet), {
+    className: `traffic-line ${level}`,
+    interactive: true,
+  }).bindTooltip(el('span', '', tooltip), { sticky: true });
+}
+
+export function signalMarker(position: LatLng): L.Marker {
+  const html = el('div', 'signal-marker');
+  html.append(el('span', 'lamp'), el('span', 'lamp'), el('span', 'lamp'));
+  return L.marker(toLeaflet(position), {
+    icon: L.divIcon({ className: 'map-icon', html, iconSize: [0, 0] }),
+    title: 'Semáforo',
+    keyboard: false,
+  });
+}
+
+export function tollMarker(position: LatLng, name: string | null): L.Marker {
+  const html = el('div', 'label-marker');
+  html.append(el('span', 'truck-label', 'Peaje'));
+  return L.marker(toLeaflet(position), {
+    icon: L.divIcon({ className: 'map-icon', html, iconSize: [0, 0] }),
+    title: name ? `Peaje ${name}` : 'Plaza de peaje',
+  });
+}
+
+export function destinationMarker(position: LatLng, label: string): L.Marker {
+  const html = el('div', 'destination-marker');
+  html.append(el('span', 'destination-pin'), el('span', 'truck-label', label));
+  return L.marker(toLeaflet(position), {
+    icon: L.divIcon({ className: 'map-icon', html, iconSize: [0, 0] }),
+    title: label,
+    zIndexOffset: 900,
+  });
 }

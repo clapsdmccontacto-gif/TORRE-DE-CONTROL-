@@ -90,6 +90,8 @@ export const localApi: TorreApi = {
 
   deliveries: async () => engine().planner.deliveries(),
   optimizeRoutes: (request) => run(async () => engine().planner.optimize(request)),
+  applyRoadAdjustment: (planId, unitPlate, adjustment) =>
+    run(async () => engine().planner.applyRoadAdjustment(planId, unitPlate, adjustment)),
   publishPlan: (planId) => run(async () => engine().planner.publish(planId)),
   activePlan: async () => engine().planner.activePlan(),
 

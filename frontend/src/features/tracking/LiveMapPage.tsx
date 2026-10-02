@@ -1,20 +1,47 @@
 import type L from 'leaflet';
-import { Bell, CircleCheck, MapPin, Truck, type LucideIcon } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Bell,
+  CircleCheck,
+  LoaderCircle,
+  MapPin,
+  MapPinned,
+  Truck,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useBasemap } from '@/components/map/basemaps';
+import {
+  LOS_ANGELES_CENTER,
   depotMarker,
+  destinationMarker,
   routeLine,
+  signalMarker,
   stopMarker,
   toLeaflet,
+  tollLine,
+  tollMarker,
+  trafficLine,
   truckMarker,
   useLeafletMap,
 } from '@/components/map/leaflet';
-import { BasemapControl } from '@/components/map/BasemapControl';
+import { BasemapControl, TomTomKeySection } from '@/components/map/BasemapControl';
 import { StatTile, StatusBanner } from '@/components/status';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { api, apiMode } from '@/lib/api';
+import { NativeSelect } from '@/components/ui/input';
+import { RoadRouteDetails } from '@/features/routing/RoadRouteDetails';
+import { api, apiMode, errorMessage } from '@/lib/api';
 import { STOP_STATE_LABEL, formatClock, formatKg, formatKm } from '@/lib/format';
+import {
+  ROUTING_VEHICLES,
+  roadsideFeatures,
+  streetRoute,
+  vehicleCodeFor,
+  type StreetRouteQuery,
+  type StreetRouteResult,
+} from '@/lib/road-routing';
 import { cn } from '@/lib/utils';
 import type { FleetSnapshot, LatLng, LiveDevice, PositionFix, TrackingEvent } from '@/types/api';
 import { DeviceStatusLabel } from './device-status';
@@ -28,6 +55,15 @@ const EVENT_ICON: Record<TrackingEvent['type'], LucideIcon> = {
 };
 
 const TRACK_REFRESH_MS = 10_000;
+
+interface StreetState {
+  query: StreetRouteQuery | null;
+  result: StreetRouteResult | null;
+  pending: boolean;
+  error: string | null;
+}
+
+const NO_STREET: StreetState = { query: null, result: null, pending: false, error: null };
 
 export function LiveMapPage() {
   const [snapshot, setSnapshot] = useState<FleetSnapshot | null>(null);
@@ -83,6 +119,70 @@ export function LiveMapPage() {
     return last && fixes.at(-1)?.recordedAt !== last.recordedAt ? [...fixes, last] : fixes;
   }, [track, selectedId, selected]);
 
+  // --- Ruta por calles hacia un destino marcado en el mapa -------------------------
+  const hasKey = useBasemap().tomtomKey.trim() !== '';
+  const [picking, setPicking] = useState(false);
+  const [street, setStreet] = useState<StreetState>(NO_STREET);
+  const [vehicleChoice, setVehicleChoice] = useState<string | null>(null);
+  const [avoidTolls, setAvoidTolls] = useState(false);
+  const streetRequest = useRef(0);
+  const vehicleCode = vehicleChoice ?? vehicleCodeFor(selected?.vehicleName);
+  const origin = selected?.position
+    ? { location: selected.position as LatLng, label: `${selected.vehiclePlate} (posición actual)` }
+    : depot
+      ? { location: depot.location, label: depot.name }
+      : { location: LOS_ANGELES_CENTER, label: 'el centro de Los Ángeles' };
+
+  async function computeStreet(query: StreetRouteQuery) {
+    const id = ++streetRequest.current;
+    const current = () => id === streetRequest.current;
+    setStreet({ query, result: null, pending: true, error: null });
+    try {
+      const route = await streetRoute(query);
+      if (!current()) return;
+      setStreet({
+        query,
+        result: { route, roadside: null, roadsideError: null },
+        pending: false,
+        error: null,
+      });
+      // Semáforos y peajes llegan después: la ruta ya se ve mientras tanto.
+      const roadside = await roadsideFeatures(route.path).then(
+        (features) => ({ roadside: features, roadsideError: null }),
+        (e: unknown) => ({ roadside: null, roadsideError: errorMessage(e) }),
+      );
+      if (current()) {
+        setStreet((s) => (s.result ? { ...s, result: { ...s.result, ...roadside } } : s));
+      }
+    } catch (e) {
+      if (current()) setStreet({ query, result: null, pending: false, error: errorMessage(e) });
+    }
+  }
+
+  function pickDestination(destination: LatLng) {
+    setPicking(false);
+    void computeStreet({
+      origin: origin.location,
+      originLabel: origin.label,
+      destination,
+      vehicleCode,
+      loadKg: selected?.cargoWeightKg ?? 0,
+      avoidTolls,
+    });
+  }
+
+  function changeOptions(next: { vehicleCode?: string; avoidTolls?: boolean }) {
+    if (next.vehicleCode !== undefined) setVehicleChoice(next.vehicleCode);
+    if (next.avoidTolls !== undefined) setAvoidTolls(next.avoidTolls);
+    if (street.query) void computeStreet({ ...street.query, ...next });
+  }
+
+  function clearStreet() {
+    streetRequest.current++;
+    setPicking(false);
+    setStreet(NO_STREET);
+  }
+
   const counts = {
     moving: devices.filter((d) => d.status === 'EN_MOVIMIENTO').length,
     stopped: devices.filter((d) => d.status === 'DETENIDO').length,
@@ -118,6 +218,34 @@ export function LiveMapPage() {
             trackFixes={trackFixes}
             depot={depot}
             onSelect={setSelectedId}
+            picking={picking}
+            onPick={pickDestination}
+            onCancelPick={() => setPicking(false)}
+            street={street}
+            toolbar={
+              <div className="flex flex-wrap items-center gap-2 border-t px-4 py-3 text-sm">
+                <Button
+                  id="pick-destination"
+                  variant={picking ? 'default' : 'outline'}
+                  aria-pressed={picking}
+                  disabled={!hasKey}
+                  onClick={() => setPicking(!picking)}
+                >
+                  <MapPinned />
+                  {picking ? 'Toque el destino en el mapa' : 'Marcar destino en el mapa'}
+                </Button>
+                {(street.query || picking) && (
+                  <Button variant="ghost" onClick={clearStreet}>
+                    <X /> {picking && !street.query ? 'Cancelar' : 'Quitar ruta'}
+                  </Button>
+                )}
+                <span className="min-w-0 text-xs text-muted-foreground">
+                  {hasKey
+                    ? `Ruta por calles con tráfico desde ${origin.label}.`
+                    : 'Para trazar rutas por calles pegue la clave gratuita de TomTom en «Ruta por calles».'}
+                </span>
+              </div>
+            }
           />
         </Card>
 
@@ -150,6 +278,80 @@ export function LiveMapPage() {
           </Card>
 
           {selected && <DeviceDetail device={selected} trackFixes={trackFixes} />}
+
+          <Card className="gap-3 py-4">
+            <CardHeader className="px-4">
+              <CardTitle>Ruta por calles</CardTitle>
+              <CardDescription>
+                Marque un destino en el mapa: se traza por las calles exactas con el tráfico de este
+                momento, los peajes y los semáforos del camino. Con un vehículo elegido sale desde
+                su posición; si no, desde la bodega.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid grid-cols-1 gap-3 px-4 text-sm">
+              {hasKey && (
+                <>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                    <label className="grid gap-1.5">
+                      <span className="font-medium">Vehículo</span>
+                      <NativeSelect
+                        id="road-vehicle"
+                        value={vehicleCode}
+                        onChange={(e) => changeOptions({ vehicleCode: e.target.value })}
+                      >
+                        {ROUTING_VEHICLES.map((v) => (
+                          <option key={v.code} value={v.code}>
+                            {v.name}
+                          </option>
+                        ))}
+                      </NativeSelect>
+                    </label>
+                    <label className="flex h-9 items-center gap-2">
+                      <input
+                        id="road-avoid-tolls"
+                        type="checkbox"
+                        className="size-4 accent-current"
+                        checked={avoidTolls}
+                        onChange={(e) => changeOptions({ avoidTolls: e.target.checked })}
+                      />
+                      Evitar peajes
+                    </label>
+                  </div>
+                  {street.query ? (
+                    <p className="text-muted-foreground">
+                      Desde {street.query.originLabel}
+                      {street.query.loadKg > 0 && ` · ${formatKg(street.query.loadKg)} a bordo`}.
+                      Los camiones se rutean con sus restricciones de peso.
+                    </p>
+                  ) : (
+                    <p className="text-muted-foreground">
+                      Toque «Marcar destino en el mapa» y luego el punto al que quiere ir.
+                    </p>
+                  )}
+                  {street.pending && (
+                    <p role="status" className="flex items-center gap-2 text-muted-foreground">
+                      <LoaderCircle className="size-4 animate-spin" aria-hidden /> Calculando la
+                      ruta con el tráfico actual…
+                    </p>
+                  )}
+                  {street.error && (
+                    <StatusBanner status="critical" title="No se pudo trazar la ruta">
+                      {street.error}
+                    </StatusBanner>
+                  )}
+                  {street.result && street.query && (
+                    <RoadRouteDetails
+                      route={street.result.route}
+                      roadside={street.result.roadside}
+                      roadsideError={street.result.roadsideError}
+                      destination={street.query.destination}
+                    />
+                  )}
+                </>
+              )}
+              <TomTomKeySection />
+            </CardContent>
+          </Card>
 
           <Card className="gap-3 py-4">
             <CardHeader className="px-4">
@@ -286,12 +488,22 @@ function LiveFleetMap({
   trackFixes,
   depot,
   onSelect,
+  picking,
+  onPick,
+  onCancelPick,
+  street,
+  toolbar,
 }: {
   devices: LiveDevice[];
   selected: LiveDevice | null;
   trackFixes: PositionFix[];
   depot: { name: string; location: LatLng } | null;
   onSelect: (sessionId: string) => void;
+  picking: boolean;
+  onPick: (destination: LatLng) => void;
+  onCancelPick: () => void;
+  street: StreetState;
+  toolbar: ReactNode;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { mapRef, layerRef, baseMapAvailable } = useLeafletMap(containerRef, 10);
@@ -413,6 +625,69 @@ function LiveFleetMap({
     return () => markers.forEach((m) => m.remove());
   }, [layerRef, stopsKey]);
 
+  // Modo "marcar destino": el próximo toque en el mapa fija el destino (Esc cancela).
+  const onPickRef = useRef(onPick);
+  const onCancelPickRef = useRef(onCancelPick);
+  useEffect(() => {
+    onPickRef.current = onPick;
+    onCancelPickRef.current = onCancelPick;
+  }, [onPick, onCancelPick]);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !picking) return;
+    const container = map.getContainer();
+    container.classList.add('is-picking');
+    const pick = (e: L.LeafletMouseEvent) =>
+      onPickRef.current({ lat: e.latlng.lat, lng: e.latlng.lng });
+    const escape = (e: KeyboardEvent) => e.key === 'Escape' && onCancelPickRef.current();
+    map.on('click', pick);
+    document.addEventListener('keydown', escape);
+    return () => {
+      container.classList.remove('is-picking');
+      map.off('click', pick);
+      document.removeEventListener('keydown', escape);
+    };
+  }, [mapRef, picking]);
+
+  // Ruta por calles: borde en tramos con peaje, ruta con contorno (para distinguirla del
+  // trayecto recorrido), congestión encima,
+  // semáforos, plazas de peaje y destino.
+  const streetQuery = street.query;
+  const streetResult = street.result;
+  useEffect(() => {
+    const layer = layerRef.current;
+    if (!layer || !streetQuery) return;
+    const items: L.Layer[] = [];
+    const add = (item: L.Layer) => items.push(item.addTo(layer));
+    if (streetResult) {
+      const { route, roadside } = streetResult;
+      route.tollPaths.forEach((path) => add(tollLine(path)));
+      add(routeLine(route.path, 'road-casing'));
+      add(routeLine(route.path, 'route-1 road-line'));
+      route.traffic.forEach((span) =>
+        add(
+          trafficLine(
+            span.path,
+            span.severity,
+            `${span.category}${span.delayMin > 0 ? ` · +${span.delayMin} min` : ''}`,
+          ),
+        ),
+      );
+      roadside?.trafficSignals.forEach((p) => add(signalMarker(p)));
+      roadside?.tollBooths.forEach((b) => add(tollMarker(b.location, b.name)));
+    }
+    add(destinationMarker(streetQuery.destination, 'Destino'));
+    return () => items.forEach((item) => item.remove());
+  }, [layerRef, streetQuery, streetResult]);
+
+  // Al llegar una ruta nueva, el mapa la encuadra completa.
+  const streetPath = streetResult?.route.path;
+  useEffect(() => {
+    if (streetPath && streetPath.length > 1) {
+      mapRef.current?.fitBounds(streetPath.map(toLeaflet), { padding: [40, 40], maxZoom: 16 });
+    }
+  }, [mapRef, streetPath]);
+
   // Al elegir un vehículo el mapa lo centra (sólo al cambiar la selección, no en cada lectura).
   const devicesRef = useRef(devices);
   useEffect(() => {
@@ -432,6 +707,11 @@ function LiveFleetMap({
           role="region"
           aria-label="Mapa de la flota en vivo"
         />
+        {picking && (
+          <p className="absolute top-3 right-3 left-14 z-[1000] rounded-md border bg-card/95 px-3 py-2 text-sm font-medium sm:right-auto">
+            Toque el punto de destino en el mapa (Esc para cancelar).
+          </p>
+        )}
         {!baseMapAvailable && (
           <p className="absolute right-3 bottom-8 left-3 z-[1000] rounded-md border bg-card/95 px-3 py-2 text-xs text-muted-foreground sm:left-auto sm:max-w-xs">
             El mapa de calles no cargó (sin internet, contenido externo bloqueado o proveedor no
@@ -439,6 +719,7 @@ function LiveFleetMap({
           </p>
         )}
       </div>
+      {toolbar}
       <BasemapControl />
     </>
   );

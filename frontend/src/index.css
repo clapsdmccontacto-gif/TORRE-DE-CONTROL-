@@ -245,3 +245,82 @@
 .route-swatch.route-other {
   border-top-style: dashed;
 }
+
+/* Capa de tráfico en vivo (TomTom): colores del proveedor, levemente translúcida. */
+.traffic-tiles {
+  opacity: 0.85;
+}
+.leaflet-container.is-picking {
+  cursor: crosshair;
+}
+.road-casing {
+  stroke: var(--card);
+  stroke-width: 9;
+}
+.road-line {
+  stroke-width: 5;
+}
+.toll-line {
+  fill: none;
+  stroke: var(--foreground);
+  stroke-opacity: 0.35;
+  stroke-width: 11;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.traffic-line {
+  fill: none;
+  stroke-width: 6;
+  stroke-linecap: round;
+}
+.traffic-line.is-warning {
+  stroke: var(--status-warning);
+}
+.traffic-line.is-critical {
+  stroke: var(--status-critical);
+}
+.signal-marker {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: grid;
+  gap: 1px;
+  padding: 2px;
+  border-radius: 3px;
+  background: var(--foreground);
+  border: 1px solid var(--card);
+}
+.signal-marker .lamp {
+  width: 4px;
+  height: 4px;
+  border-radius: 9999px;
+}
+.signal-marker .lamp:nth-child(1) {
+  background: var(--status-critical);
+}
+.signal-marker .lamp:nth-child(2) {
+  background: var(--status-warning);
+}
+.signal-marker .lamp:nth-child(3) {
+  background: var(--status-good);
+}
+.label-marker {
+  position: absolute;
+  transform: translate(-50%, -50%);
+}
+.destination-marker {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transform: translate(-8px, -8px);
+}
+.destination-pin {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 9999px 9999px 9999px 0;
+  transform: rotate(-45deg);
+  background: var(--series-1);
+  border: 2px solid var(--card);
+  box-shadow: 0 0 0 1px var(--series-1);
+}

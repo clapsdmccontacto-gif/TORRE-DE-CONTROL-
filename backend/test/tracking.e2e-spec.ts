@@ -45,6 +45,39 @@ describe('Rastreo y rutas (e2e)', () => {
     expect(active.body.plan.id).toBe(plan.body.id);
   });
 
+  it('aplica la ruta por calles a una ruta del plan y valida el cuerpo', async () => {
+    const plan = await request(app.getHttpServer())
+      .post('/api/v1/routing/optimize')
+      .send({ deliveryIds: ['NV-100231', 'NV-100235'] })
+      .expect(200);
+    const route = plan.body.routes[0];
+    const n = route.stops.length;
+    const url = `/api/v1/routing/plans/${plan.body.id}/routes/${route.unitPlate}/road`;
+    const body = {
+      stopOrder: route.stops.map((_: unknown, i: number) => i),
+      legs: Array.from({ length: n + 1 }, () => ({ distanceKm: 6.2, durationMin: 11 })),
+      path: route.path,
+      trafficDelayMin: 4,
+      tollKm: 0,
+    };
+    const adjusted = await request(app.getHttpServer()).post(url).send(body).expect(200);
+    const updated = adjusted.body.routes.find(
+      (r: { unitPlate: string }) => r.unitPlate === route.unitPlate,
+    );
+    expect(updated.road).toEqual({ trafficDelayMin: 4, tollKm: 0 });
+    expect(updated.distanceKm).toBeCloseTo(6.2 * (n + 1), 1);
+
+    await request(app.getHttpServer())
+      .post(url)
+      .send({ ...body, path: [] })
+      .expect(400);
+    const wrongOrder = await request(app.getHttpServer())
+      .post(url)
+      .send({ ...body, stopOrder: [99] })
+      .expect(422);
+    expect(wrongOrder.body.code).toBe('AJUSTE_INVALIDO');
+  });
+
   it('registra un conductor, recibe su GPS y lo muestra en la flota en vivo', async () => {
     const units = await request(app.getHttpServer()).get('/api/v1/tracking/units').expect(200);
     expect(units.body.map((u: { plate: string }) => u.plate)).toContain('DEMO-02');

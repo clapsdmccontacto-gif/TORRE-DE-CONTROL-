@@ -37,3 +37,15 @@ export function Button({
     />
   );
 }
+
+/** Enlace con apariencia de botón (p. ej. abrir la navegación en Waze). */
+export function LinkButton({
+  className,
+  variant,
+  size,
+  ...props
+}: ComponentProps<'a'> & VariantProps<typeof buttonVariants>) {
+  return (
+    <a data-slot="button" className={cn(buttonVariants({ variant, size }), className)} {...props} />
+  );
+}

@@ -1,4 +1,4 @@
-import { LoaderCircle, Route, Send } from 'lucide-react';
+import { LoaderCircle, Route, Send, TrafficCone } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import {
   depotMarker,
@@ -9,8 +9,9 @@ import {
   toLeaflet,
   useLeafletMap,
 } from '@/components/map/leaflet';
-import { BasemapControl } from '@/components/map/BasemapControl';
-import { StatTile, StatusBanner } from '@/components/status';
+import { useBasemap } from '@/components/map/basemaps';
+import { BasemapControl, TomTomKeySection } from '@/components/map/BasemapControl';
+import { StatTile, StatusBanner, StatusLabel } from '@/components/status';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,14 +21,25 @@ import {
   VEHICLE_SHORT_LABEL,
   formatClock,
   formatClp,
+  formatDuration,
   formatKg,
   formatKm,
   formatLiters,
   formatPct,
   formatPlannedTime,
 } from '@/lib/format';
+import { adjustPlanRoute } from '@/lib/road-routing';
 import { cn } from '@/lib/utils';
 import type { DeliveryView, RoutePlan } from '@/types/api';
+
+interface RoadProgress {
+  /** Patente en cálculo; null al terminar. */
+  current: string | null;
+  done: number;
+  total: number;
+  reordered: string[];
+  error: string | null;
+}
 
 export function RoutePlannerPage() {
   const [deliveries, setDeliveries] = useState<DeliveryView[]>([]);
@@ -36,6 +48,7 @@ export function RoutePlannerPage() {
   const [plan, setPlan] = useState<RoutePlan | null>(null);
   const [pending, setPending] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [road, setRoad] = useState<RoadProgress | null>(null);
 
   // Abre con el plan publicado o, si no hay, con todos los pedidos ya optimizados.
   useEffect(() => {
@@ -65,6 +78,7 @@ export function RoutePlannerPage() {
   async function optimize() {
     setPending(true);
     setError(null);
+    setRoad(null);
     try {
       setPlan(
         await api.optimizeRoutes({ deliveryIds: [...selected], dieselPriceClp: dieselPrice }),
@@ -74,6 +88,36 @@ export function RoutePlannerPage() {
     } finally {
       setPending(false);
     }
+  }
+
+  /** Ruta por ruta: calles y tráfico reales, y el orden de paradas que gasta menos diésel. */
+  async function adjustWithRoads() {
+    if (!plan) return;
+    setPending(true);
+    setError(null);
+    let current = plan;
+    const progress: RoadProgress = {
+      current: null,
+      done: 0,
+      total: plan.routes.length,
+      reordered: [],
+      error: null,
+    };
+    for (const route of plan.routes) {
+      setRoad({ ...progress, current: route.unitPlate });
+      try {
+        const result = await adjustPlanRoute(current, route);
+        current = result.plan;
+        setPlan(current);
+        progress.done++;
+        if (result.refined.reordered) progress.reordered.push(route.unitPlate);
+      } catch (e) {
+        progress.error = `${route.unitPlate}: ${errorMessage(e)}`;
+        break;
+      }
+    }
+    setRoad({ ...progress, current: null });
+    setPending(false);
   }
 
   async function publish() {
@@ -152,8 +196,9 @@ export function RoutePlannerPage() {
           </Button>
           <p className="text-xs text-muted-foreground">
             Asigna cada pedido al camión compatible que menos diésel agrega y reordena las paradas
-            considerando que el consumo baja a medida que se descarga. Distancias estimadas en línea
-            recta × 1,3 y velocidad media de 45 km/h.
+            considerando que el consumo baja a medida que se descarga. Primero estima distancias
+            (línea recta × 1,3, 45 km/h); luego «Ajustar con calles y tráfico» las recalcula con el
+            recorrido real de TomTom.
           </p>
         </CardContent>
       </Card>
@@ -164,7 +209,15 @@ export function RoutePlannerPage() {
             {error}
           </StatusBanner>
         )}
-        {plan && <PlanResult plan={plan} pending={pending} onPublish={publish} />}
+        {plan && (
+          <PlanResult
+            plan={plan}
+            pending={pending}
+            road={road}
+            onAdjust={adjustWithRoads}
+            onPublish={publish}
+          />
+        )}
       </div>
     </div>
   );
@@ -173,13 +226,18 @@ export function RoutePlannerPage() {
 function PlanResult({
   plan,
   pending,
+  road,
+  onAdjust,
   onPublish,
 }: {
   plan: RoutePlan;
   pending: boolean;
+  road: RoadProgress | null;
+  onAdjust: () => void;
   onPublish: () => void;
 }) {
   const { totals, baseline, savings } = plan;
+  const roadRoutes = plan.routes.filter((r) => r.road !== null).length;
   return (
     <>
       <div className="grid grid-cols-2 gap-3 2xl:grid-cols-4">
@@ -204,6 +262,8 @@ function PlanResult({
         >
           Frente a despachar en orden de llegada con el primer camión disponible:{' '}
           {formatClp(savings.fuelCostClp)} y {Math.round(savings.co2Kg)} kg de CO₂ menos en el día.
+          {roadRoutes > 0 &&
+            ' El ahorro compara ambas opciones con distancias estimadas; km, horarios y diésel de las rutas ajustadas ya son por calles.'}
         </StatusBanner>
       ) : (
         <StatusBanner status="good" title="El despacho en orden de llegada ya era el más eficiente">
@@ -216,6 +276,14 @@ function PlanResult({
           {plan.unassigned.map((u) => `${u.deliveryId} (${u.siteName}): ${u.reason}`).join(' ')}
         </StatusBanner>
       )}
+
+      <RoadAdjustCard
+        plan={plan}
+        pending={pending}
+        road={road}
+        roadRoutes={roadRoutes}
+        onAdjust={onAdjust}
+      />
 
       <Card className="gap-0 overflow-hidden py-0">
         <RoutePlanMap plan={plan} />
@@ -237,6 +305,25 @@ function PlanResult({
                 {formatKm(route.distanceKm)} · {formatLiters(route.fuelLiters)} ·{' '}
                 {formatClp(route.fuelCostClp)} · carga {formatPct(route.weightUtilization)}
               </p>
+              {route.road ? (
+                <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <StatusLabel status={route.road.trafficDelayMin >= 10 ? 'warning' : 'good'}>
+                    Por calles con tráfico
+                  </StatusLabel>
+                  <span className="text-muted-foreground">
+                    {route.road.trafficDelayMin > 0
+                      ? `+${formatDuration(route.road.trafficDelayMin)} por congestión`
+                      : 'sin demoras'}
+                    {' · '}
+                    {route.road.tollKm > 0
+                      ? `${formatKm(route.road.tollKm)} con peaje`
+                      : 'sin peajes'}
+                    {road?.reordered.includes(route.unitPlate) && ' · orden de paradas ajustado'}
+                  </span>
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">Distancia y horarios estimados.</p>
+              )}
               <ol className="grid gap-1.5">
                 <li className="flex gap-3 text-muted-foreground">
                   <span className="w-12 shrink-0 tabular-nums">08:00</span>
@@ -329,5 +416,76 @@ function RoutePlanMap({ plan }: { plan: RoutePlan }) {
       </div>
       <BasemapControl />
     </>
+  );
+}
+
+function RoadAdjustCard({
+  plan,
+  pending,
+  road,
+  roadRoutes,
+  onAdjust,
+}: {
+  plan: RoutePlan;
+  pending: boolean;
+  road: RoadProgress | null;
+  roadRoutes: number;
+  onAdjust: () => void;
+}) {
+  const hasKey = useBasemap().tomtomKey.trim() !== '';
+  const published = plan.publishedAt !== null;
+  const allDone = roadRoutes === plan.routes.length;
+  return (
+    <Card className="gap-3">
+      <CardHeader>
+        <CardTitle>Calles y tráfico reales</CardTitle>
+        <CardDescription>
+          Recalcula cada ruta por las calles exactas con el tráfico de ahora (TomTom), con
+          restricciones para camiones y peajes, y prueba otro orden de paradas: se queda con el que
+          gasta menos diésel. Los conductores reciben el plan ajustado al publicar.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid grid-cols-1 gap-3 text-sm">
+        {hasKey && (
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              id="adjust-roads"
+              onClick={onAdjust}
+              disabled={pending || published || plan.routes.length === 0}
+            >
+              {road?.current ? <LoaderCircle className="animate-spin" /> : <TrafficCone />}
+              {allDone ? 'Volver a ajustar con el tráfico actual' : 'Ajustar con calles y tráfico'}
+            </Button>
+            <span className="text-muted-foreground">
+              {published
+                ? 'El plan ya está publicado; para ajustarlo optimice de nuevo.'
+                : road?.current
+                  ? `Calculando ${road.current} (${road.done + 1} de ${road.total})…`
+                  : `${roadRoutes} de ${plan.routes.length} rutas ajustadas · usa ${
+                      plan.routes.length * 2
+                    } consultas como máximo de las 2.500 diarias gratis.`}
+            </span>
+          </div>
+        )}
+        {road && !road.current && road.error && (
+          <StatusBanner status="critical" title="No se pudo ajustar una ruta">
+            {road.error}
+            {road.done === 1 && ' La ruta anterior quedó ajustada.'}
+            {road.done > 1 && ` Las ${road.done} rutas anteriores quedaron ajustadas.`}
+          </StatusBanner>
+        )}
+        {road && !road.current && !road.error && road.done > 0 && (
+          <StatusBanner
+            status="good"
+            title={`${road.done} ${road.done === 1 ? 'ruta ajustada' : 'rutas ajustadas'} con calles y tráfico`}
+          >
+            {road.reordered.length > 0
+              ? `Cambió el orden de paradas en ${road.reordered.join(', ')} para gastar menos diésel.`
+              : 'El orden de paradas del optimizador ya era el mejor por calles.'}
+          </StatusBanner>
+        )}
+        <TomTomKeySection />
+      </CardContent>
+    </Card>
   );
 }

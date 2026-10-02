@@ -94,6 +94,8 @@ torre-control/
 ├── .env.example
 ├── database/
 │   ├── migrations/001_init.sql   # esquema completo (WMS + TMS + geodatos + vistas)
+│   ├── migrations/002_tracking_routing.sql # GPS de conductores y consumo de diésel
+│   ├── migrations/003_road_routing.sql     # rutas ajustadas por calles (tráfico, peajes)
 │   └── seeds/001_demo_data.sql   # bodega, obras, catálogo, flota, zonas, pedidos de ejemplo
 ├── backend/                      # NestJS 12 · TypeScript · ESM · Vitest · Zod
 │   ├── src/
@@ -112,9 +114,12 @@ torre-control/
 │   │       │   ├── infrastructure/ # default-fleet.ts · in-memory-fleet-catalog.ts
 │   │       │   └── http/
 │   │       ├── routing/          # OPTIMIZADOR DE RUTAS por consumo de diésel
-│   │       │   ├── domain/       #   delivery.ts · fuel.ts · optimizer.ts (+ specs)
-│   │       │   ├── application/  #   route-planner.ts (sin framework: lo reusa el frontend)
-│   │       │   └── infrastructure/ # demo-network.ts (bodega, obras, pedidos, patentes)
+│   │       │   ├── domain/       #   delivery.ts · fuel.ts · optimizer.ts · road-route.ts ·
+│   │       │   │                 #   road-adjustment.ts (+ specs)
+│   │       │   ├── application/  #   route-planner.ts · road-refinement.ts (sin framework:
+│   │       │   │                 #   los reusa el frontend) · road-router.port.ts
+│   │       │   └── infrastructure/ # demo-network.ts · tomtom.ts (rutas con tráfico) ·
+│   │       │                     #   overpass.ts (semáforos y peajes de OpenStreetMap)
 │   │       ├── tracking/         # RASTREO GPS de conductores
 │   │       │   ├── domain/       #   tracking.ts (filtro GPS, paradas, aviso) · simulator.ts
 │   │       │   ├── application/  #   tracking-hub.ts (sesiones, eventos, flota en vivo)
@@ -133,11 +138,13 @@ torre-control/
         │   ├── ui/               # button, card, badge, input (convención shadcn/ui)
         │   ├── status.tsx        # estados con ícono + texto, medidores, KPIs
         │   ├── product-lines.tsx # editor de líneas SKU + cantidad
-        │   └── map/leaflet.ts    # mapa (Leaflet + OpenStreetMap), marcadores y rutas
+        │   └── map/              # leaflet.ts (mapa, marcadores y rutas) · basemaps.ts y
+        │                         # BasemapControl.tsx (TomTom/Esri/MapTiler, tráfico, clave)
         ├── features/
         │   ├── picking/MixCheckPage.tsx          # validador de mezcla
         │   ├── load-planning/CubicajePage.tsx    # simulador de cubicaje
-        │   ├── routing/RoutePlannerPage.tsx      # optimizar y publicar rutas
+        │   ├── routing/RoutePlannerPage.tsx      # optimizar, ajustar por calles y publicar
+        │   ├── routing/RoadRouteDetails.tsx      # detalle: tráfico, peajes, semáforos, Waze
         │   ├── tracking/LiveMapPage.tsx          # mapa en vivo de la flota
         │   ├── tracking/DriverPage.tsx           # modo conductor (GPS del teléfono)
         │   ├── picking-monitor/                  (fase 2)
@@ -146,6 +153,7 @@ torre-control/
         ├── lib/
         │   ├── api.ts            # elige el modo: local (sin servidor) o HTTP (backend)
         │   ├── local-api.ts      # ejecuta en el navegador las reglas de backend/src (alias @core)
+        │   ├── road-routing.ts   # rutas por calles desde el navegador (clave TomTom del equipo)
         │   └── format.ts, utils.ts
         └── types/api.ts          # contratos de la API
 ```
@@ -396,8 +404,55 @@ para minimizar el diésel, con la técnica habitual de los sistemas de ruteo (TM
    informa el ahorro en litros, pesos y CO₂. Con los pedidos de ejemplo ahorra 10,5 L (13 %).
 
 Al **publicar** el plan, cada conductor ve su ruta y su carga al iniciar en modo conductor.
-Distancias estimadas en línea recta × 1,3: el siguiente paso es usar distancias reales por
-calle (motor OSRM) y ventanas horarias de las obras.
+El optimizador estima distancias en línea recta × 1,3; antes de publicar, *Ajustar con calles
+y tráfico* recalcula cada ruta con el recorrido real (sección 5.5).
+
+### 5.5 Rutas por calles con tráfico, peajes y semáforos (TomTom)
+
+Se usa **TomTom** porque su plan gratuito no pide tarjeta, permite uso comercial y su API de
+rutas (v1) calcula **rutas para camiones** (peso y carga por eje), con **tráfico en vivo**,
+tramos con peaje, congestión y obras, indicaciones en español y reordenamiento de paradas.
+Incluye 2.500 cálculos de ruta y 50.000 mosaicos de mapa por día.
+
+**Conseguir la clave (5 minutos, gratis):**
+
+1. Entrar a [developer.tomtom.com](https://developer.tomtom.com/) y registrarse
+   (*Register* / *Get your free API key*) con el correo de la empresa. No pide tarjeta.
+2. Confirmar la cuenta desde el correo que llega.
+3. En el panel (*Dashboard*) abrir **Keys**: ya viene una clave creada con todos los
+   productos. Copiarla.
+4. En la app: *Mapa en vivo* → debajo del mapa, *Mapa base* → **TomTom con tráfico
+   (recomendado)** → pegar la clave en *Clave de TomTom* → **Probar clave**.
+
+La clave queda guardada **sólo en ese dispositivo** (no en el repositorio ni en el servidor):
+hay que pegarla en cada computador de la torre. Los conductores no la necesitan.
+
+**Qué hace:**
+
+- **Mapa TomTom + tráfico en vivo**: capa de flujo (verde fluido, naranjo lento, rojo
+  congestionado) sobre cualquier mapa base; se refresca cada 5 minutos.
+- **Marcar destino** (`#mapa`): se toca *Marcar destino en el mapa* y luego el punto. La ruta
+  sale desde el vehículo elegido (con su carga a bordo) o desde la bodega, y se dibuja por las
+  calles exactas con los tramos con peaje resaltados, la congestión encima, los semáforos y
+  las plazas de peaje. El panel muestra distancia, tiempo con y sin tráfico, hora de llegada,
+  demoras por tramo, km con peaje, semáforos, indicaciones calle por calle y botones para
+  navegar con **Waze** o **Google Maps**. Se puede cambiar el vehículo o *Evitar peajes*.
+- **Ajustar con calles y tráfico** (`#rutas`): cada ruta del plan se pide a TomTom en el orden
+  del optimizador y con las paradas reordenadas; se queda con la que gasta menos diésel según
+  la carga en cada tramo (`application/road-refinement.ts`). El plan guarda trazado, orden,
+  horarios, km, diésel, minutos de congestión y km con peaje
+  (`POST /routing/plans/:id/routes/:plate/road`), y los conductores lo reciben al publicar.
+- **Modo conductor**: botones *Navegar con Waze* / *Google Maps* hacia la próxima obra.
+
+**Límites a tener presentes:**
+
+- TomTom informa *dónde* hay peaje, no su **valor**: las tarifas por categoría y horario de
+  las concesionarias quedan para una tabla propia (hoja de ruta).
+- **Semáforos y plazas de peaje** vienen de OpenStreetMap (Overpass API, gratis, sin clave):
+  su exactitud depende de lo mapeado en cada ciudad. El tiempo de TomTom ya considera las
+  esperas habituales en cruces.
+- Las consultas salen del navegador hacia `api.tomtom.com` y `overpass-api.de`; si una red
+  bloquea esos dominios, el resto de la app funciona igual y el panel lo informa.
 
 ### Otros endpoints
 
@@ -410,6 +465,7 @@ calle (motor OSRM) y ventanas horarias de las obras.
 | GET | `/api/v1/load-planning/vehicle-types` | Flota con carga útil, volumen y largo derivados |
 | GET | `/api/v1/routing/deliveries` | Pedidos a despachar con su carga y vehículos posibles |
 | POST | `/api/v1/routing/optimize` | Optimiza rutas (`deliveryIds`, `dieselPriceClp`) |
+| POST | `/api/v1/routing/plans/:id/routes/:plate/road` | Aplica a una ruta del plan su recorrido por calles (orden, tramos, trazado) |
 | POST | `/api/v1/routing/plans/:id/publish` | Publica el plan a la flota |
 | GET | `/api/v1/routing/plans/active` | Plan publicado |
 | GET | `/api/v1/tracking/units` | Vehículos para el conductor, con sus paradas asignadas |
@@ -420,7 +476,7 @@ calle (motor OSRM) y ventanas horarias de las obras.
 | GET | `/api/v1/tracking/live` · `/api/v1/tracking/stream` | Flota en vivo (foto · flujo SSE) |
 
 Errores: `400 SOLICITUD_INVALIDA` con detalle por campo (Zod) y `422` para reglas de negocio
-(`SKU_DESCONOCIDO`, `CANTIDAD_INVALIDA`, `CARGA_VACIA`).
+(`SKU_DESCONOCIDO`, `CANTIDAD_INVALIDA`, `CARGA_VACIA`, `AJUSTE_INVALIDO`, `PLAN_PUBLICADO`).
 
 ## 6. Usar la app
 
@@ -499,6 +555,7 @@ Todos están en un solo lugar y son fáciles de cambiar:
   (1.050 CLP/L por defecto, editable en pantalla): reemplazar por los rendimientos reales de
   cada camión.
 - **Mapa base**: se elige debajo de cada mapa y queda guardado en el dispositivo.
+  *TomTom con tráfico* es el recomendado (clave gratuita, sección 5.5).
   *Esri (sin clave)* es el predeterminado y funciona también con el HTML abierto como archivo;
   *MapTiler (con clave)* es la opción estable para la empresa (crear una clave gratuita en
   maptiler.com y pegarla en el selector; revisar el plan según el uso); *Sin mapa de calles*
@@ -515,4 +572,4 @@ Todos están en un solo lugar y son fáciles de cambiar:
 |---|---|
 | **2 · Operación de bodega** | Adaptadores PostgreSQL (Kysely) para los puertos actuales; autenticación y roles; flujo de tareas de picking con escaneo persistido y autorización de supervisor (`mix_alerts`); monitor de picking; staging virtual por obra con reservas de andén y etiquetas QR |
 | **3 · Última milla** | Guardar sesiones y GPS en PostgreSQL (`driver_sessions`, `gps_positions`); envío real del aviso al capataz (outbox → WhatsApp/SMS); evaluador de la matriz de restricción que filtra la flota antes de optimizar; e-POD con firma, foto georreferenciada y subida firmada a S3/MinIO; app nativa del conductor (Capacitor) para rastreo en segundo plano |
-| **4 · Escala** | Distancias reales por calle (OSRM) y ventanas horarias en el optimizador; varios viajes por camión; particionado de `gps_positions` (o TimescaleDB); contratos compartidos (OpenAPI); integración con el ERP |
+| **4 · Escala** | Matriz de tiempos por calle con tráfico (TomTom Matrix) dentro del optimizador y ventanas horarias de las obras; tarifas de peaje por plaza y categoría; varios viajes por camión; particionado de `gps_positions` (o TimescaleDB); contratos compartidos (OpenAPI); integración con el ERP |

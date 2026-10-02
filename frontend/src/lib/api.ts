@@ -40,6 +40,11 @@ function httpApi(baseUrl: string): TorreApi {
 
     deliveries: () => request('/routing/deliveries'),
     optimizeRoutes: (payload) => post('/routing/optimize', payload),
+    applyRoadAdjustment: (planId, unitPlate, adjustment) =>
+      post(
+        `/routing/plans/${encodeURIComponent(planId)}/routes/${encodeURIComponent(unitPlate)}/road`,
+        adjustment,
+      ),
     publishPlan: (planId) => post(`/routing/plans/${encodeURIComponent(planId)}/publish`, {}),
     activePlan: async () =>
       (await request<{ plan: RoutePlan | null }>('/routing/plans/active')).plan,

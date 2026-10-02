@@ -55,6 +55,13 @@ export interface PlannedRoute {
   fuelLiters: number;
   fuelCostClp: number;
   co2Kg: number;
+  /** null = distancias estimadas; con datos = ajustada con calles y tráfico reales. */
+  road: RoadSummary | null;
+}
+
+export interface RoadSummary {
+  trafficDelayMin: number;
+  tollKm: number;
 }
 
 export interface PlanTotals {
@@ -313,9 +320,12 @@ function insertUnassigned(solution: Solution, options: RoutingOptions): boolean 
 }
 
 function summarize(solution: Solution, options: RoutingOptions): PlanTotals {
-  const routes = solution.drafts
-    .filter((d) => d.stops.length > 0)
-    .map((d) => describeRoute(d, options));
+  return planTotals(
+    solution.drafts.filter((d) => d.stops.length > 0).map((d) => describeRoute(d, options)),
+  );
+}
+
+export function planTotals(routes: readonly PlannedRoute[]): PlanTotals {
   const liters = routes.reduce((sum, r) => sum + r.fuelLiters, 0);
   return {
     routes: routes.length,
@@ -379,5 +389,6 @@ function describeRoute(draft: Draft, options: RoutingOptions): PlannedRoute {
     fuelLiters: roundTo(liters, 1),
     fuelCostClp: Math.round(liters * options.dieselPriceClp),
     co2Kg: roundTo(liters * CO2_KG_PER_LITER_DIESEL, 1),
+    road: null,
   };
 }
