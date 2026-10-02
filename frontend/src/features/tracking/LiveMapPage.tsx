@@ -9,6 +9,7 @@ import {
   truckMarker,
   useLeafletMap,
 } from '@/components/map/leaflet';
+import { BasemapControl } from '@/components/map/BasemapControl';
 import { StatTile, StatusBanner } from '@/components/status';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -423,19 +424,22 @@ function LiveFleetMap({
   }, [mapRef, selectedId]);
 
   return (
-    <div className="relative">
-      <div
-        ref={containerRef}
-        className="h-[60vh] min-h-[360px] w-full xl:h-[calc(100vh-15rem)]"
-        role="region"
-        aria-label="Mapa de la flota en vivo"
-      />
-      {!baseMapAvailable && (
-        <p className="absolute right-3 bottom-8 left-3 z-[1000] rounded-md border bg-card/95 px-3 py-2 text-xs text-muted-foreground sm:left-auto sm:max-w-xs">
-          Mapa de calles no disponible en esta vista (sin internet o contenido externo bloqueado).
-          Posiciones, trayectos y obras se muestran igual.
-        </p>
-      )}
-    </div>
+    <>
+      <div className="relative">
+        <div
+          ref={containerRef}
+          className="h-[60vh] min-h-[360px] w-full xl:h-[calc(100vh-15rem)]"
+          role="region"
+          aria-label="Mapa de la flota en vivo"
+        />
+        {!baseMapAvailable && (
+          <p className="absolute right-3 bottom-8 left-3 z-[1000] rounded-md border bg-card/95 px-3 py-2 text-xs text-muted-foreground sm:left-auto sm:max-w-xs">
+            El mapa de calles no cargó (sin internet, contenido externo bloqueado o proveedor no
+            disponible). Pruebe otro mapa base abajo; lo demás se muestra igual.
+          </p>
+        )}
+      </div>
+      <BasemapControl />
+    </>
   );
 }

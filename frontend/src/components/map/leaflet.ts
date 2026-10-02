@@ -2,25 +2,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { LatLng } from '@/types/api';
-
-/**
- * Mapa base. Por defecto CARTO (datos de OpenStreetMap), que tiene versión clara y oscura
- * y no exige el encabezado Referer: los servidores de tile.openstreetmap.org bloquean con
- * "Access blocked" los pedidos sin Referer, como los del HTML abierto como archivo.
- * Para operación comercial a escala conviene un proveedor con cuenta propia (MapTiler,
- * Stadia, etc.): se configura con VITE_MAP_TILE_URL, VITE_MAP_TILE_URL_DARK y
- * VITE_MAP_ATTRIBUTION al compilar.
- */
-const CARTO_URL = 'https://{s}.basemaps.cartocdn.com/{style}/{z}/{x}/{y}{r}.png';
-const env = import.meta.env as Record<string, string | undefined>;
-const TILE_URL = {
-  light: env.VITE_MAP_TILE_URL ?? CARTO_URL.replace('{style}', 'light_all'),
-  dark:
-    env.VITE_MAP_TILE_URL_DARK ?? env.VITE_MAP_TILE_URL ?? CARTO_URL.replace('{style}', 'dark_all'),
-};
-const ATTRIBUTION =
-  env.VITE_MAP_ATTRIBUTION ??
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>';
+import { basemapLayers, getBasemap, subscribeBasemap } from './basemaps';
 
 /** Tema efectivo: un data-theme explícito manda; si no, la preferencia del sistema. */
 function isDarkTheme(): boolean {
@@ -52,24 +34,36 @@ export function useLeafletMap(containerRef: RefObject<HTMLDivElement | null>, zo
       zoom,
     );
     map.attributionControl.setPrefix(false);
+    // Mapa base según el proveedor elegido y el tema (claro u oscuro). Se reemplaza en el
+    // lugar cuando cambia cualquiera de los dos, sin recrear el mapa.
+    let baseLayers: L.TileLayer[] = [];
     let failedTiles = 0;
-    const tiles = L.tileLayer(isDarkTheme() ? TILE_URL.dark : TILE_URL.light, {
-      maxZoom: 19,
-      subdomains: 'abcd',
-      attribution: ATTRIBUTION,
-      referrerPolicy: 'strict-origin-when-cross-origin',
-    })
-      .on('tileerror', () => {
-        failedTiles++;
-        if (failedTiles === 3) setBaseMapAvailable(false);
-      })
-      .addTo(map);
-
-    // Cambia a la versión clara u oscura del mapa junto con el tema.
-    const applyTheme = () => tiles.setUrl(isDarkTheme() ? TILE_URL.dark : TILE_URL.light);
+    const applyBasemap = () => {
+      for (const layer of baseLayers) layer.remove();
+      failedTiles = 0;
+      baseLayers = basemapLayers(getBasemap(), isDarkTheme()).map((spec) =>
+        L.tileLayer(spec.url, {
+          maxZoom: 19,
+          maxNativeZoom: spec.maxNativeZoom,
+          attribution: spec.attribution,
+          referrerPolicy: 'strict-origin-when-cross-origin',
+        })
+          .on('tileerror', () => {
+            failedTiles++;
+            if (failedTiles === 3) setBaseMapAvailable(false);
+          })
+          .addTo(map),
+      );
+    };
+    const reapply = () => {
+      setBaseMapAvailable(true);
+      applyBasemap();
+    };
+    applyBasemap();
+    const unsubscribe = subscribeBasemap(reapply);
     const media = window.matchMedia('(prefers-color-scheme: dark)');
-    media.addEventListener('change', applyTheme);
-    const themeObserver = new MutationObserver(applyTheme);
+    media.addEventListener('change', reapply);
+    const themeObserver = new MutationObserver(reapply);
     themeObserver.observe(document.documentElement, { attributeFilter: ['data-theme'] });
     mapRef.current = map;
     layerRef.current = L.layerGroup().addTo(map);
@@ -78,7 +72,8 @@ export function useLeafletMap(containerRef: RefObject<HTMLDivElement | null>, zo
     resize.observe(container);
     return () => {
       resize.disconnect();
-      media.removeEventListener('change', applyTheme);
+      unsubscribe();
+      media.removeEventListener('change', reapply);
       themeObserver.disconnect();
       map.remove();
       mapRef.current = null;

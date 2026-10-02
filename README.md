@@ -498,12 +498,14 @@ Todos están en un solo lugar y son fáciles de cambiar:
 - **Consumo de diésel por vehículo** (vacío / plena carga, L/100 km) y **precio del diésel**
   (1.050 CLP/L por defecto, editable en pantalla): reemplazar por los rendimientos reales de
   cada camión.
-- **Mapa base**: CARTO (datos de OpenStreetMap), con versión clara y oscura. Es gratuito con
-  límites de uso; para operación comercial a escala conviene un proveedor con cuenta propia
-  (MapTiler, Stadia u otro), que se configura al compilar con `VITE_MAP_TILE_URL`,
-  `VITE_MAP_TILE_URL_DARK` y `VITE_MAP_ATTRIBUTION`. No usar `tile.openstreetmap.org`
-  directamente: sus servidores voluntarios bloquean ("Access blocked") los pedidos sin
-  Referer, como los del HTML abierto como archivo.
+- **Mapa base**: se elige debajo de cada mapa y queda guardado en el dispositivo.
+  *Esri (sin clave)* es el predeterminado y funciona también con el HTML abierto como archivo;
+  *MapTiler (con clave)* es la opción estable para la empresa (crear una clave gratuita en
+  maptiler.com y pegarla en el selector; revisar el plan según el uso); *Sin mapa de calles*
+  siempre funciona. Al compilar se puede fijar un proveedor propio con `VITE_MAP_TILE_URL`,
+  `VITE_MAP_TILE_URL_DARK` y `VITE_MAP_ATTRIBUTION` (aparece como *Personalizado*). Los
+  servicios sin clave cambian sus reglas: `tile.openstreetmap.org` bloquea pedidos sin
+  Referer y CARTO pasó a exigir clave, por eso no se usan.
 - **Velocidad media 45 km/h y factor de recorrido 1,3**: calibrar con los trayectos que ya
   registra el GPS (`v_session_tracks`).
 

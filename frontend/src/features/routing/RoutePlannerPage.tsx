@@ -9,6 +9,7 @@ import {
   toLeaflet,
   useLeafletMap,
 } from '@/components/map/leaflet';
+import { BasemapControl } from '@/components/map/BasemapControl';
 import { StatTile, StatusBanner } from '@/components/status';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -311,18 +312,22 @@ function RoutePlanMap({ plan }: { plan: RoutePlan }) {
   }, [mapRef, layerRef, plan]);
 
   return (
-    <div className="relative">
-      <div
-        ref={containerRef}
-        className="h-[420px] w-full"
-        role="region"
-        aria-label="Mapa de las rutas planificadas"
-      />
-      {!baseMapAvailable && (
-        <p className="absolute right-3 bottom-8 left-3 z-[1000] rounded-md border bg-card/95 px-3 py-2 text-xs text-muted-foreground sm:left-auto sm:max-w-xs">
-          Mapa de calles no disponible en esta vista. Rutas y obras se muestran igual.
-        </p>
-      )}
-    </div>
+    <>
+      <div className="relative">
+        <div
+          ref={containerRef}
+          className="h-[420px] w-full"
+          role="region"
+          aria-label="Mapa de las rutas planificadas"
+        />
+        {!baseMapAvailable && (
+          <p className="absolute right-3 bottom-8 left-3 z-[1000] rounded-md border bg-card/95 px-3 py-2 text-xs text-muted-foreground sm:left-auto sm:max-w-xs">
+            El mapa de calles no cargó (sin internet, contenido externo bloqueado o proveedor no
+            disponible). Pruebe otro mapa base abajo; lo demás se muestra igual.
+          </p>
+        )}
+      </div>
+      <BasemapControl />
+    </>
   );
 }
