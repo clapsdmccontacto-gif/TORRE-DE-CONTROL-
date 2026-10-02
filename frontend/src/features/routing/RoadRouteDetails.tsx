@@ -1,7 +1,7 @@
 import { navigationLinks } from '@core/modules/routing/domain/road-route';
-import { ExternalLink, Navigation } from 'lucide-react';
+import { ExternalLink, Navigation, RotateCw } from 'lucide-react';
 import { StatusBanner, StatusLabel, type Status } from '@/components/status';
-import { LinkButton } from '@/components/ui/button';
+import { Button, LinkButton } from '@/components/ui/button';
 import { formatClock, formatDuration, formatKm } from '@/lib/format';
 import type { LatLng, RoadRoute, RoadsideFeatures, TrafficSeverity } from '@/types/api';
 
@@ -17,11 +17,13 @@ export function RoadRouteDetails({
   route,
   roadside,
   roadsideError,
+  onRetryRoadside,
   destination,
 }: {
   route: RoadRoute;
   roadside: RoadsideFeatures | null;
   roadsideError: string | null;
+  onRetryRoadside: () => void;
   destination: LatLng;
 }) {
   const links = navigationLinks(destination);
@@ -105,6 +107,16 @@ export function RoadRouteDetails({
               ? roadsideError
               : 'Buscando semáforos y plazas de peaje en OpenStreetMap…'}
         </p>
+        {roadsideError && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="justify-self-start"
+            onClick={onRetryRoadside}
+          >
+            <RotateCw /> Reintentar semáforos y peajes
+          </Button>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-2">

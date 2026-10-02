@@ -414,18 +414,21 @@ rutas (v1) calcula **rutas para camiones** (peso y carga por eje), con **tráfic
 tramos con peaje, congestión y obras, indicaciones en español y reordenamiento de paradas.
 Incluye 2.500 cálculos de ruta y 50.000 mosaicos de mapa por día.
 
-**Conseguir la clave (5 minutos, gratis):**
+**Clave de la empresa:** viene **incluida en la app** (`frontend/src/components/map/basemaps.ts`,
+a pedido de la empresa), así que mapa, tráfico y rutas funcionan en cualquier equipo sin
+configurar nada y TomTom es el mapa base predeterminado. Es una clave de navegador: quien
+abra la app puede verla, y el cupo diario gratuito es compartido entre todos los equipos.
 
-1. Entrar a [developer.tomtom.com](https://developer.tomtom.com/) y registrarse
-   (*Register* / *Get your free API key*) con el correo de la empresa. No pide tarjeta.
-2. Confirmar la cuenta desde el correo que llega.
-3. En el panel (*Dashboard*) abrir **Keys**: ya viene una clave creada con todos los
-   productos. Copiarla.
-4. En la app: *Mapa en vivo* → debajo del mapa, *Mapa base* → **TomTom con tráfico
-   (recomendado)** → pegar la clave en *Clave de TomTom* → **Probar clave**.
+Para cambiarla (por ejemplo, si se agota el cupo o se quiere rotar):
 
-La clave queda guardada **sólo en ese dispositivo** (no en el repositorio ni en el servidor):
-hay que pegarla en cada computador de la torre. Los conductores no la necesitan.
+1. Entrar a [developer.tomtom.com](https://developer.tomtom.com/), iniciar sesión (o
+   registrarse con el correo de la empresa; no pide tarjeta) y abrir **Keys** en el panel.
+2. Crear o copiar una clave.
+3. Reemplazarla en `basemaps.ts` (o compilar con `VITE_TOMTOM_KEY=…`; vacía = sin clave
+   incluida). Un equipo puntual también puede usar otra: *Mapa base* → *Clave de TomTom* →
+   pegarla → **Probar clave** (queda sólo en ese equipo).
+
+Los conductores no la necesitan: navegan con Waze o Google Maps.
 
 **Qué hace:**
 
@@ -449,8 +452,9 @@ hay que pegarla en cada computador de la torre. Los conductores no la necesitan.
 - TomTom informa *dónde* hay peaje, no su **valor**: las tarifas por categoría y horario de
   las concesionarias quedan para una tabla propia (hoja de ruta).
 - **Semáforos y plazas de peaje** vienen de OpenStreetMap (Overpass API, gratis, sin clave):
-  su exactitud depende de lo mapeado en cada ciudad. El tiempo de TomTom ya considera las
-  esperas habituales en cruces.
+  su exactitud depende de lo mapeado en cada ciudad. Los servidores públicos se saturan
+  seguido, así que se prueban tres en orden (`OVERPASS_ENDPOINTS`) y el panel ofrece
+  *Reintentar*. El tiempo de TomTom ya considera las esperas habituales en cruces.
 - Las consultas salen del navegador hacia `api.tomtom.com` y `overpass-api.de`; si una red
   bloquea esos dominios, el resto de la app funciona igual y el panel lo informa.
 
@@ -555,8 +559,8 @@ Todos están en un solo lugar y son fáciles de cambiar:
   (1.050 CLP/L por defecto, editable en pantalla): reemplazar por los rendimientos reales de
   cada camión.
 - **Mapa base**: se elige debajo de cada mapa y queda guardado en el dispositivo.
-  *TomTom con tráfico* es el recomendado (clave gratuita, sección 5.5).
-  *Esri (sin clave)* es el predeterminado y funciona también con el HTML abierto como archivo;
+  *TomTom con tráfico* es el predeterminado (clave de la empresa incluida, sección 5.5).
+  *Esri (sin clave)* funciona también con el HTML abierto como archivo;
   *MapTiler (con clave)* es la opción estable para la empresa (crear una clave gratuita en
   maptiler.com y pegarla en el selector; revisar el plan según el uso); *Sin mapa de calles*
   siempre funciona. Al compilar se puede fijar un proveedor propio con `VITE_MAP_TILE_URL`,

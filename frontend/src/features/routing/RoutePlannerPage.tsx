@@ -9,7 +9,7 @@ import {
   toLeaflet,
   useLeafletMap,
 } from '@/components/map/leaflet';
-import { useBasemap } from '@/components/map/basemaps';
+import { useTomTomKey } from '@/components/map/basemaps';
 import { BasemapControl, TomTomKeySection } from '@/components/map/BasemapControl';
 import { StatTile, StatusBanner, StatusLabel } from '@/components/status';
 import { Badge } from '@/components/ui/badge';
@@ -432,7 +432,7 @@ function RoadAdjustCard({
   roadRoutes: number;
   onAdjust: () => void;
 }) {
-  const hasKey = useBasemap().tomtomKey.trim() !== '';
+  const hasKey = useTomTomKey() !== '';
   const published = plan.publishedAt !== null;
   const allDone = roadRoutes === plan.routes.length;
   return (

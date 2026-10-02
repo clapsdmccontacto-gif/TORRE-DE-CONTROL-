@@ -39,29 +39,55 @@ describe('parseRoadside', () => {
 });
 
 describe('OverpassRoadsideLookup', () => {
+  const signal = { type: 'node', lat: -37.47, lon: -72.35, tags: { highway: 'traffic_signals' } };
+  const ok = () => new Response(JSON.stringify({ elements: [signal] }));
+
   it('envía la consulta por POST y traduce la respuesta', async () => {
     let body = '';
     const lookup = new OverpassRoadsideLookup(async (_url, init) => {
       body = String(init?.body);
-      return new Response(
-        JSON.stringify({
-          elements: [
-            { type: 'node', lat: -37.47, lon: -72.35, tags: { highway: 'traffic_signals' } },
-          ],
-        }),
-      );
+      return ok();
     });
     const features = await lookup.features(path);
     expect(decodeURIComponent(body)).toContain('traffic_signals');
     expect(features.trafficSignals).toEqual([{ lat: -37.47, lng: -72.35 }]);
   });
 
-  it('no consulta sin trazado y avisa si OpenStreetMap no responde', async () => {
-    const failing = new OverpassRoadsideLookup(async () => new Response('busy', { status: 504 }));
+  it('si un servidor está ocupado prueba el siguiente', async () => {
+    const calls: string[] = [];
+    const responses = [
+      () => new Response('rate_limited', { status: 429 }),
+      () =>
+        new Response(
+          JSON.stringify({ elements: [], remark: 'runtime error: Query timed out in "query"' }),
+        ),
+      ok,
+    ];
+    const lookup = new OverpassRoadsideLookup(
+      async (url) => {
+        calls.push(url);
+        return responses[calls.length - 1]();
+      },
+      ['https://a/api', 'https://b/api', 'https://c/api'],
+    );
+    const features = await lookup.features(path);
+    expect(calls).toEqual(['https://a/api', 'https://b/api', 'https://c/api']);
+    expect(features.trafficSignals).toHaveLength(1);
+  });
+
+  it('no consulta sin trazado y avisa si ningún servidor responde', async () => {
+    let calls = 0;
+    const failing = new OverpassRoadsideLookup(async () => {
+      calls++;
+      if (calls === 1) throw new TypeError('Failed to fetch');
+      return new Response('busy', { status: 504 });
+    });
     await expect(failing.features(path.slice(0, 1))).resolves.toEqual({
       trafficSignals: [],
       tollBooths: [],
     });
+    expect(calls).toBe(0);
     await expect(failing.features(path)).rejects.toMatchObject({ code: 'OSM_NO_DISPONIBLE' });
+    expect(calls).toBe(3);
   });
 });

@@ -10,7 +10,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useBasemap } from '@/components/map/basemaps';
+import { useTomTomKey } from '@/components/map/basemaps';
 import {
   LOS_ANGELES_CENTER,
   depotMarker,
@@ -120,7 +120,7 @@ export function LiveMapPage() {
   }, [track, selectedId, selected]);
 
   // --- Ruta por calles hacia un destino marcado en el mapa -------------------------
-  const hasKey = useBasemap().tomtomKey.trim() !== '';
+  const hasKey = useTomTomKey() !== '';
   const [picking, setPicking] = useState(false);
   const [street, setStreet] = useState<StreetState>(NO_STREET);
   const [vehicleChoice, setVehicleChoice] = useState<string | null>(null);
@@ -147,16 +147,27 @@ export function LiveMapPage() {
         error: null,
       });
       // Semáforos y peajes llegan después: la ruta ya se ve mientras tanto.
-      const roadside = await roadsideFeatures(route.path).then(
-        (features) => ({ roadside: features, roadsideError: null }),
-        (e: unknown) => ({ roadside: null, roadsideError: errorMessage(e) }),
-      );
-      if (current()) {
-        setStreet((s) => (s.result ? { ...s, result: { ...s.result, ...roadside } } : s));
-      }
+      await loadRoadside(id, route.path);
     } catch (e) {
       if (current()) setStreet({ query, result: null, pending: false, error: errorMessage(e) });
     }
+  }
+
+  async function loadRoadside(id: number, path: LatLng[]) {
+    const roadside = await roadsideFeatures(path).then(
+      (features) => ({ roadside: features, roadsideError: null }),
+      (e: unknown) => ({ roadside: null, roadsideError: errorMessage(e) }),
+    );
+    if (id === streetRequest.current) {
+      setStreet((s) => (s.result ? { ...s, result: { ...s.result, ...roadside } } : s));
+    }
+  }
+
+  function retryRoadside() {
+    const result = street.result;
+    if (!result) return;
+    setStreet({ ...street, result: { ...result, roadside: null, roadsideError: null } });
+    void loadRoadside(streetRequest.current, result.route.path);
   }
 
   function pickDestination(destination: LatLng) {
@@ -344,6 +355,7 @@ export function LiveMapPage() {
                       route={street.result.route}
                       roadside={street.result.roadside}
                       roadsideError={street.result.roadsideError}
+                      onRetryRoadside={retryRoadside}
                       destination={street.query.destination}
                     />
                   )}

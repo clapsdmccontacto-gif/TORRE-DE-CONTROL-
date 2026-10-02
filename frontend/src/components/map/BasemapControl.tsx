@@ -5,9 +5,12 @@ import { Button } from '@/components/ui/button';
 import { Input, NativeSelect } from '@/components/ui/input';
 import {
   BASEMAP_OPTIONS,
+  HAS_COMPANY_TOMTOM_KEY,
   checkTomTomKey,
   setBasemap,
+  tomtomKeyOf,
   useBasemap,
+  useTomTomKey,
   type BasemapId,
   type KeyCheck,
 } from './basemaps';
@@ -51,7 +54,7 @@ export function BasemapControl() {
         )}
       </div>
       {basemap.id === 'tomtom' && <TomTomKeyField />}
-      {basemap.tomtomKey.trim() !== '' && (
+      {tomtomKeyOf(basemap) !== '' && (
         <label className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <input
             id="basemap-traffic"
@@ -81,12 +84,12 @@ const CHECK_TEXT: Record<KeyCheck, { status: 'good' | 'warning' | 'critical'; te
 };
 
 /**
- * Clave gratuita de TomTom. Se guarda sólo en este dispositivo y la usan el mapa, la
- * capa de tráfico y el cálculo de rutas por calles.
+ * Clave de TomTom de este equipo. Si queda vacía se usa la de la empresa (incluida en la
+ * app). La usan el mapa, la capa de tráfico y el cálculo de rutas por calles.
  */
 export function TomTomKeyField() {
   const basemap = useBasemap();
-  const key = basemap.tomtomKey.trim();
+  const key = tomtomKeyOf(basemap);
   const [check, setCheck] = useState<{ key: string; result: KeyCheck | 'checking' } | null>(null);
   const result = check && check.key === key ? check.result : null;
 
@@ -105,7 +108,11 @@ export function TomTomKeyField() {
         <Input
           id="tomtom-key"
           className="min-w-0 flex-1"
-          placeholder="Pegue aquí la clave de developer.tomtom.com"
+          placeholder={
+            HAS_COMPANY_TOMTOM_KEY
+              ? 'Usando la clave de la empresa (opcional: pegue otra)'
+              : 'Pegue aquí la clave de developer.tomtom.com'
+          }
           value={basemap.tomtomKey}
           onChange={(e) => setBasemap({ ...basemap, tomtomKey: e.target.value })}
           autoComplete="off"
@@ -122,6 +129,8 @@ export function TomTomKeyField() {
         </p>
       )}
       <p className="text-xs text-muted-foreground">
+        {HAS_COMPANY_TOMTOM_KEY &&
+          'La app ya trae la clave de la empresa; pegue otra sólo para usar una distinta en este equipo. '}
         Gratis y sin tarjeta: cree una cuenta en{' '}
         <a
           href="https://developer.tomtom.com/"
@@ -143,7 +152,7 @@ export function TomTomKeyField() {
  * (y mientras se escribe); si ya estaba guardada, sólo un enlace para cambiarla.
  */
 export function TomTomKeySection() {
-  const hasKey = useBasemap().tomtomKey.trim() !== '';
+  const hasKey = useTomTomKey() !== '';
   const [open, setOpen] = useState(!hasKey);
   if (open || !hasKey) return <TomTomKeyField />;
   return (

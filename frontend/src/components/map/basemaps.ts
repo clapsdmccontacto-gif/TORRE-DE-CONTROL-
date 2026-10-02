@@ -4,9 +4,9 @@ import { useSyncExternalStore } from 'react';
  * Proveedores de mapa base. Los servicios gratuitos sin clave cambian sus reglas
  * (OpenStreetMap bloquea pedidos sin Referer; CARTO pasó a exigir clave), así que el
  * proveedor se elige en la propia app y queda guardado en el dispositivo:
- * - TomTom: recomendado. Con la clave gratuita (developer.tomtom.com, sin tarjeta) suma
- *   tráfico en vivo y rutas por calles para camiones. La clave también se usa para rutas
- *   aunque se elija otro mapa base.
+ * - TomTom: predeterminado. Con la clave de la empresa (incluida) suma tráfico en vivo y
+ *   rutas por calles para camiones. La clave también se usa para rutas aunque se elija
+ *   otro mapa base, y cada equipo puede usar una propia.
  * - Esri: sin clave; funciona también con el HTML abierto como archivo.
  * - MapTiler: con la clave gratuita de la empresa (maptiler.com), para uso estable.
  * - Sin mapa de calles: siempre funciona; camiones, rutas y obras se ven igual.
@@ -47,6 +47,21 @@ const CUSTOM = env.VITE_MAP_TILE_URL
     }
   : null;
 
+/**
+ * Clave de TomTom de Constructor Center, incluida a pedido de la empresa para que mapa,
+ * tráfico y rutas funcionen en todos los equipos sin configurar nada. Es una clave de
+ * navegador (plan gratuito, sin tarjeta): quien use la app puede verla. Para cambiarla,
+ * crear otra en developer.tomtom.com → Keys y reemplazarla aquí, o compilar con
+ * VITE_TOMTOM_KEY (vacía = sin clave incluida).
+ */
+const COMPANY_TOMTOM_KEY = (env.VITE_TOMTOM_KEY ?? '66qzlnRDJMzyCIACdNvHPuujLrRuEYGc').trim();
+export const HAS_COMPANY_TOMTOM_KEY = COMPANY_TOMTOM_KEY !== '';
+
+/** Clave efectiva: la propia de este equipo o, si no hay, la de la empresa. */
+export function tomtomKeyOf(preference: BasemapPreference): string {
+  return preference.tomtomKey.trim() || COMPANY_TOMTOM_KEY;
+}
+
 export const BASEMAP_OPTIONS: { id: BasemapId; label: string }[] = [
   ...(CUSTOM ? [{ id: 'custom' as const, label: 'Personalizado' }] : []),
   { id: 'tomtom', label: 'TomTom con tráfico (recomendado)' },
@@ -57,7 +72,7 @@ export const BASEMAP_OPTIONS: { id: BasemapId; label: string }[] = [
 
 /** Capas a dibujar (base, nombres y tráfico encima) para el tema actual. */
 export function basemapLayers(preference: BasemapPreference, dark: boolean): TileSpec[] {
-  const key = encodeURIComponent(preference.tomtomKey.trim());
+  const key = encodeURIComponent(tomtomKeyOf(preference));
   const traffic: TileSpec[] =
     preference.traffic && key
       ? [
@@ -85,7 +100,7 @@ function baseLayers(preference: BasemapPreference, dark: boolean): TileSpec[] {
     case 'custom':
       return CUSTOM ? [base(dark ? CUSTOM.dark : CUSTOM.light, CUSTOM.attribution, 19)] : [];
     case 'tomtom': {
-      const key = encodeURIComponent(preference.tomtomKey.trim());
+      const key = encodeURIComponent(tomtomKeyOf(preference));
       if (!key) return [];
       const style = dark ? 'night' : 'main';
       return [
@@ -125,7 +140,7 @@ function baseLayers(preference: BasemapPreference, dark: boolean): TileSpec[] {
 // --- Preferencia guardada en el dispositivo (compartida por todos los mapas abiertos) ---
 const STORAGE_KEY = 'torre-control.basemap';
 const DEFAULT_PREFERENCE: BasemapPreference = {
-  id: CUSTOM ? 'custom' : 'esri',
+  id: CUSTOM ? 'custom' : HAS_COMPANY_TOMTOM_KEY ? 'tomtom' : 'esri',
   maptilerKey: '',
   tomtomKey: '',
   traffic: true,
@@ -193,7 +208,11 @@ export function checkTomTomKey(key: string): Promise<KeyCheck> {
   });
 }
 
-/** Clave de TomTom guardada en este dispositivo (vacía si no hay). */
+/** Clave de TomTom efectiva en este dispositivo (vacía si no hay ninguna). */
 export function tomtomKey(): string {
-  return current.tomtomKey.trim();
+  return tomtomKeyOf(current);
+}
+
+export function useTomTomKey(): string {
+  return tomtomKeyOf(useBasemap());
 }
