@@ -51,11 +51,14 @@ secretos (la única clave es la de TomTom de la empresa, ver abajo).
 - `Dockerfile` (API + interfaz en modo API en un servicio) y `render.yaml` para Render.
 - Nube: la app (también la de GitHub Pages) busca el servidor en `CLOUD_URL`
   (`frontend/src/lib/cloud.ts`, igual al nombre del servicio en `render.yaml`) y entra con la
-  clave de acceso de la empresa (`cloud/`: se crea la primera vez, scrypt, `x-torre-key` o
-  `?key=` en SSE). `CloudGate` sube los datos locales si la nube está vacía.
+  clave de acceso de la empresa (`cloud/`: se crea en la app, sin mayúsculas, scrypt,
+  `x-torre-key` o `?key=` en SSE; se puede volver a crear mientras la nube no tenga datos).
+  Si Render da otra dirección, se pega en «Flota y bodega» y viaja en los enlaces (`nube=`).
+  `CloudGate` sube los datos locales si la nube está vacía. Sin Basic Auth: una sola clave.
 - Variables: `PORT`, `DATABASE_URL` (PostgreSQL de los datos de la empresa y de la clave;
   sin ella, en memoria), `CORS_ORIGINS` (por defecto GitHub Pages), `ACCESS_CONTROL`
-  (`off` sólo en los e2e), `STATIC_DIR`; opcionales `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD`.
+  (`off` sólo en los e2e), `STATIC_DIR`; opcional `ACCESS_KEY` (fija la clave de la empresa:
+  recuperación si se olvida con datos ya cargados).
 - Mapa base: selector en la app (`frontend/src/components/map/basemaps.ts`): TomTom con
   tráfico por defecto (clave de la empresa incluida), Esri sin clave, MapTiler con clave, o
   sin mapa. Proveedor fijo al compilar con

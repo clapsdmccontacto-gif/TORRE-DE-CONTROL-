@@ -26,11 +26,27 @@ describe('Nube: clave de acceso y CORS (e2e)', () => {
     await request(server)
       .get('/api/v1/cloud/status')
       .expect(200)
-      .expect({ service: 'torre-control', claimed: false });
+      .expect({ service: 'torre-control', claimed: false, canClaim: true });
     const blocked = await request(server).get('/api/v1/master-data').expect(403);
     expect(blocked.body.code).toBe('NUBE_SIN_CLAVE');
 
-    await request(server).post('/api/v1/cloud/claim').send({ key: 'bodega-2026' }).expect(200);
+    // Sin datos todavía, una clave mal escrita u olvidada se reemplaza creando otra.
+    await request(server).post('/api/v1/cloud/claim').send({ key: 'mal-escrita' }).expect(200);
+    await request(server)
+      .get('/api/v1/cloud/status')
+      .expect({ service: 'torre-control', claimed: true, canClaim: true });
+    await request(server).post('/api/v1/cloud/claim').send({ key: 'Bodega-2026' }).expect(200);
+    await request(server).get('/api/v1/master-data').set('x-torre-key', 'mal-escrita').expect(401);
+    await request(server)
+      .put('/api/v1/master-data/depot')
+      .set('x-torre-key', 'bodega-2026')
+      .send({ name: 'Bodega Los Ángeles', location: { lat: -37.47, lng: -72.35 } })
+      .expect(200);
+
+    // Con datos, la clave queda fija.
+    await request(server)
+      .get('/api/v1/cloud/status')
+      .expect({ service: 'torre-control', claimed: true, canClaim: false });
     const again = await request(server)
       .post('/api/v1/cloud/claim')
       .send({ key: 'me-la-robo' })
@@ -39,7 +55,7 @@ describe('Nube: clave de acceso y CORS (e2e)', () => {
 
     await request(server).get('/api/v1/master-data').expect(401);
     await request(server).get('/api/v1/master-data').set('x-torre-key', 'mala').expect(401);
-    await request(server).get('/api/v1/master-data').set('x-torre-key', 'bodega-2026').expect(200);
+    await request(server).get('/api/v1/master-data').set('x-torre-key', 'BODEGA-2026').expect(200);
     await request(server)
       .get('/api/v1/cloud/session')
       .query({ key: 'bodega-2026' })

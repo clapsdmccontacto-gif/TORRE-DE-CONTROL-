@@ -1,7 +1,10 @@
-import { CloudUpload } from 'lucide-react';
-import { LinkButton } from '@/components/ui/button';
+import { CloudUpload, LoaderCircle, PlugZap } from 'lucide-react';
+import { useState } from 'react';
+import { StatusLabel } from '@/components/status';
+import { Button, LinkButton } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { CLOUD_DEPLOY_URL } from '@/lib/cloud';
+import { Input } from '@/components/ui/input';
+import { CLOUD_DEPLOY_URL, normalizeCloudUrl, probeCloud, saveCloudUrl } from '@/lib/cloud';
 
 /**
  * En la versión sin servidor: cómo activar el guardado en la nube para que lo que se
@@ -21,11 +24,14 @@ export function CloudSetupCard() {
       </CardHeader>
       <CardContent className="grid grid-cols-1 gap-3 text-sm">
         <ol className="list-decimal space-y-1 pl-5 text-muted-foreground">
-          <li>Toque «Activar guardado en la nube» y entre con su cuenta de GitHub (gratis).</li>
-          <li>Toque «Apply» y espere unos minutos: se crean el servidor y la base de datos.</li>
           <li>
-            Vuelva a abrir esta misma app: se conecta sola, le pide crear la clave de la empresa y
-            sube a la nube lo que ya cargó en este equipo.
+            Toque «Activar guardado en la nube». En la página de Render toque el botón «GitHub» para
+            entrar (no hay que escribir contraseña) y autorice.
+          </li>
+          <li>Toque «Apply» (o «Deploy Blueprint») y espere unos minutos a que termine.</li>
+          <li>
+            Vuelva a abrir esta misma app: se conecta sola, le pide inventar la clave de la empresa
+            y sube a la nube lo que ya cargó en este equipo.
           </li>
         </ol>
         <LinkButton
@@ -36,7 +42,71 @@ export function CloudSetupCard() {
         >
           <CloudUpload /> Activar guardado en la nube
         </LinkButton>
+        <ConnectByAddress />
       </CardContent>
     </Card>
+  );
+}
+
+/** Si Render le dio otra dirección al servidor, se pega aquí y la app la recuerda. */
+function ConnectByAddress() {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function connect() {
+    const origin = normalizeCloudUrl(text);
+    if (!origin) {
+      setError('Pegue la dirección completa, por ejemplo https://mi-servidor.onrender.com');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    const status = await probeCloud(`${origin}/api/v1`, 75_000);
+    setBusy(false);
+    if (!status) {
+      setError(
+        'No hay una Torre de Control en esa dirección (o todavía se está instalando). Revise que en Render diga «Live» e intente de nuevo.',
+      );
+      return;
+    }
+    saveCloudUrl(origin);
+    window.location.reload();
+  }
+
+  return (
+    <form
+      className="grid gap-2 border-t pt-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void connect();
+      }}
+    >
+      <label className="font-medium" htmlFor="cloud-url">
+        ¿Ya la activó y no se conecta sola? Pegue la dirección que muestra Render (termina en
+        «.onrender.com»)
+      </label>
+      <div className="flex gap-2">
+        <Input
+          id="cloud-url"
+          inputMode="url"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          placeholder="https://….onrender.com"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+        <Button type="submit" variant="outline" disabled={busy || !text.trim()}>
+          {busy ? <LoaderCircle className="animate-spin" /> : <PlugZap />} Conectar
+        </Button>
+      </div>
+      {busy && (
+        <p role="status" className="text-muted-foreground">
+          Buscando el servidor (puede tardar hasta un minuto si estaba dormido)…
+        </p>
+      )}
+      {error && <StatusLabel status="critical">{error}</StatusLabel>}
+    </form>
   );
 }

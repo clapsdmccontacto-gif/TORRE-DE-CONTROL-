@@ -1,6 +1,6 @@
 # Imagen única: API NestJS + interfaz (modo API) en el mismo servicio y la misma URL.
 # Variables: PORT, DATABASE_URL (PostgreSQL donde se guardan los datos de la empresa; sin
-# ella quedan en memoria), BASIC_AUTH_USER / BASIC_AUTH_PASSWORD (clave de acceso a toda la app).
+# ella quedan en memoria), ACCESS_KEY (opcional: reemplaza la clave de la empresa si se olvida).
 FROM node:22-slim AS build
 WORKDIR /app
 COPY backend/package.json backend/package-lock.json backend/

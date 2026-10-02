@@ -235,7 +235,11 @@ export function LiveMapPage() {
           >
             active el guardado en la nube
           </a>{' '}
-          (instrucciones en «Flota y bodega»).
+          (paso a paso en{' '}
+          <a className="font-medium text-foreground underline" href="#flota">
+            «Flota y bodega»
+          </a>
+          ).
         </StatusBanner>
       )}
       {devices.length === 0 && registeredVehicles !== null && (

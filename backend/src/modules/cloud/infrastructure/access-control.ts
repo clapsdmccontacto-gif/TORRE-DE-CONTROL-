@@ -8,6 +8,17 @@ interface StoredKey {
   hash: string;
 }
 
+export interface AccessOptions {
+  /** true mientras la nube no tiene datos: se puede crear otra clave (si la primera falló). */
+  canReplace?: () => boolean;
+  /**
+   * Clave fijada por el servidor (variable ACCESS_KEY en Render): reemplaza la guardada.
+   * Es la forma de recuperar el acceso si se olvida la clave cuando ya hay datos.
+   */
+  fixedKey?: string;
+  now?: () => number;
+}
+
 /** Rutas de la API abiertas sin clave: salud y la configuración inicial de la nube. */
 const OPEN_PATHS = new Set(['/api/v1/health', '/api/v1/cloud/status', '/api/v1/cloud/claim']);
 const MAX_FAILURES = 10;
@@ -17,7 +28,8 @@ const LOCKOUT_MS = 10 * 60_000;
  * Clave de acceso de la empresa a la nube. La crea quien abre la app por primera vez con
  * el servidor recién activado (no hay que buscar contraseñas en Render); después toda la
  * API la exige en `x-torre-key` (o `?key=` para el flujo en vivo, que no admite cabeceras).
- * Se guarda sólo su derivación scrypt; los intentos fallidos se limitan por IP.
+ * No distingue mayúsculas (los celulares ponen la primera en mayúscula solos). Se guarda
+ * sólo su derivación scrypt; los intentos fallidos se limitan por IP.
  */
 export class AccessControl {
   readonly ready: Promise<void>;
@@ -27,10 +39,15 @@ export class AccessControl {
   private readonly verified = new Set<string>();
   private readonly failures = new Map<string, { count: number; since: number }>();
   private readonly now: () => number;
+  private readonly canReplace: () => boolean;
+  private readonly fixed: StoredKey | null;
 
-  constructor(store: StateStore, now: () => number = Date.now) {
+  constructor(store: StateStore, options: AccessOptions = {}) {
     this.store = store;
-    this.now = now;
+    this.canReplace = options.canReplace ?? (() => false);
+    this.now = options.now ?? Date.now;
+    const fixedKey = options.fixedKey?.trim();
+    this.fixed = fixedKey ? keyFor(validKey(fixedKey)) : null;
     this.ready = store.load().then((raw) => {
       const value = raw as Partial<StoredKey> | null;
       this.stored = value?.salt && value.hash ? { salt: value.salt, hash: value.hash } : null;
@@ -38,32 +55,44 @@ export class AccessControl {
   }
 
   isClaimed(): boolean {
-    return this.stored !== null;
+    return this.current() !== null;
   }
 
-  /** Crea la clave de acceso; sólo se puede una vez (después se cambia desde la app). */
+  /** ¿Se puede crear una clave (nueva)? La primera vez y, después, mientras no haya datos. */
+  canClaim(): boolean {
+    return !this.fixed && (this.stored === null || this.canReplace());
+  }
+
+  /**
+   * Crea la clave de acceso. Mientras la nube no tenga datos se puede crear otra (por si la
+   * primera se escribió mal); cuando hay datos, queda fija.
+   */
   async claim(key: string): Promise<void> {
     await this.ready;
-    if (this.stored) {
+    if (!this.canClaim()) {
       throw new DomainError(
         'NUBE_YA_CONFIGURADA',
-        'La nube ya tiene clave de acceso: ingrésela para entrar.',
+        'La nube ya tiene clave de acceso y datos: ingrese esa clave para entrar.',
       );
     }
-    const clean = validKey(key);
-    const salt = randomBytes(16).toString('hex');
-    const stored = { salt, hash: derive(clean, salt) };
+    const stored = keyFor(validKey(key));
     await this.store.save(stored);
     this.stored = stored;
+    this.verified.clear();
   }
 
   verify(key: string): boolean {
-    if (!this.stored) return false;
+    const current = this.current();
+    if (!current) return false;
     const fingerprint = createHash('sha256').update(key).digest('hex');
     if (this.verified.has(fingerprint)) return true;
-    const expected = Buffer.from(this.stored.hash, 'hex');
-    const given = Buffer.from(derive(key, this.stored.salt), 'hex');
-    const ok = given.length === expected.length && timingSafeEqual(given, expected);
+    const expected = Buffer.from(current.hash, 'hex');
+    const clean = key.trim();
+    // Claves nuevas: sin distinguir mayúsculas; la variante exacta sirve a las ya creadas.
+    const ok = [normalize(clean), clean].some((candidate) => {
+      const given = Buffer.from(derive(candidate, current.salt), 'hex');
+      return given.length === expected.length && timingSafeEqual(given, expected);
+    });
     if (ok) this.verified.add(fingerprint);
     return ok;
   }
@@ -74,7 +103,7 @@ export class AccessControl {
       if (!req.path.startsWith('/api/') || req.method === 'OPTIONS' || OPEN_PATHS.has(req.path)) {
         return next();
       }
-      if (!this.stored) {
+      if (!this.current()) {
         res.status(403).json({
           code: 'NUBE_SIN_CLAVE',
           message: 'Cree la clave de acceso de la empresa para empezar a usar la nube.',
@@ -99,6 +128,10 @@ export class AccessControl {
       this.recordFailure(ip);
       res.status(401).json({ code: 'CLAVE_INCORRECTA', message: 'Clave de acceso incorrecta.' });
     };
+  }
+
+  private current(): StoredKey | null {
+    return this.fixed ?? this.stored;
   }
 
   private lockedOut(ip: string): boolean {
@@ -129,8 +162,17 @@ function validKey(key: string): string {
   return clean;
 }
 
+function normalize(key: string): string {
+  return key.trim().toLocaleLowerCase('es-CL');
+}
+
+function keyFor(key: string): StoredKey {
+  const salt = randomBytes(16).toString('hex');
+  return { salt, hash: derive(normalize(key), salt) };
+}
+
 function derive(key: string, salt: string): string {
-  return scryptSync(key.trim(), salt, 32).toString('hex');
+  return scryptSync(key, salt, 32).toString('hex');
 }
 
 function clientIp(req: Request): string {

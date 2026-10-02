@@ -1,13 +1,22 @@
 import { parseSnapshot } from '@core/modules/master-data/domain/master-data';
-import { CloudCheck, KeyRound, LoaderCircle, LogIn, RadioTower } from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
+import { CloudCheck, Eye, EyeOff, KeyRound, LoaderCircle, LogIn, RadioTower } from 'lucide-react';
+import { useEffect, useState, type ComponentProps, type ReactNode } from 'react';
 import { StatusLabel } from '@/components/status';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { API_URL, api, connectApi, errorMessage } from '@/lib/api';
 import { ApiError } from '@/lib/api-error';
-import { CLOUD_URL, probeCloud, readCloudKey, saveCloudKey, takeKeyFromUrl } from '@/lib/cloud';
+import {
+  CLOUD_URL,
+  cloudOrigin,
+  findCloud,
+  readCloudKey,
+  readCloudUrl,
+  saveCloudKey,
+  setConnectedCloud,
+  takeLinkParams,
+} from '@/lib/cloud';
 import { LOCAL_DATA_KEY } from '@/lib/local-api';
 
 type Gate =
@@ -22,33 +31,44 @@ type Gate =
 const WAKE_TIMEOUT_MS = 75_000;
 
 /**
+ * Dónde buscar la nube: la interfaz servida por el propio servidor usa su API; la de GitHub
+ * Pages prueba la dirección pegada en este equipo y la de render.yaml.
+ */
+function cloudApiBases(): string[] {
+  if (API_URL) return [API_URL];
+  const origins = [readCloudUrl(), import.meta.env.PROD ? CLOUD_URL : ''].filter(Boolean);
+  return [...new Set(origins)].map((origin) => `${origin}/api/v1`);
+}
+
+/**
  * Antes de mostrar la app: busca la nube y, si existe, entra con la clave de la empresa
  * (o la crea la primera vez). Sin nube, la app queda en este equipo (modo local).
  */
 export function CloudGate({ children }: { children: ReactNode }) {
   const [gate, setGate] = useState<Gate>({ step: 'checking' });
-  const [apiBase] = useState(
-    () => API_URL ?? (import.meta.env.PROD && CLOUD_URL ? `${CLOUD_URL}/api/v1` : null),
-  );
+  const [apiBase, setApiBase] = useState<string | null>(null);
+  /** La nube todavía no tiene datos: se puede crear otra clave si la primera no sirve. */
+  const [canClaim, setCanClaim] = useState(false);
 
   useEffect(() => {
     let active = true;
     const update = (next: Gate) => active && setGate(next);
-    takeKeyFromUrl();
-    if (!apiBase) {
-      update({ step: 'ready' });
-      return;
-    }
+    takeLinkParams();
+    const bases = cloudApiBases();
     const waking = setTimeout(() => update({ step: 'waking' }), 2_500);
-    void probeCloud(apiBase, WAKE_TIMEOUT_MS).then(async (status) => {
+    void findCloud(bases, WAKE_TIMEOUT_MS).then(async (found) => {
       clearTimeout(waking);
-      if (!status) {
+      if (!active) return;
+      if (!found) {
         // Sin nube activada: la app funciona en este equipo.
         update({ step: 'ready' });
         return;
       }
-      connectApi(apiBase);
-      if (!status.claimed) {
+      connectApi(found.apiBase);
+      setConnectedCloud(cloudOrigin(found.apiBase));
+      setApiBase(found.apiBase);
+      setCanClaim(found.status.canClaim);
+      if (!found.status.claimed) {
         update({ step: 'create-key', error: null });
         return;
       }
@@ -58,7 +78,7 @@ export function CloudGate({ children }: { children: ReactNode }) {
       active = false;
       clearTimeout(waking);
     };
-  }, [apiBase]);
+  }, []);
 
   /** Valida la clave guardada o escrita; si sirve, sube los datos locales y entra. */
   async function enter(key: string): Promise<Gate> {
@@ -78,13 +98,9 @@ export function CloudGate({ children }: { children: ReactNode }) {
     return { step: 'ready' };
   }
 
-  async function createKey(key: string, repeat: string) {
+  async function createKey(key: string) {
     if (key.trim().length < 6) {
       setGate({ step: 'create-key', error: 'La clave debe tener al menos 6 caracteres.' });
-      return;
-    }
-    if (key !== repeat) {
-      setGate({ step: 'create-key', error: 'Las dos claves no coinciden.' });
       return;
     }
     try {
@@ -95,7 +111,8 @@ export function CloudGate({ children }: { children: ReactNode }) {
       });
       const body = (await response.json().catch(() => null)) as { message?: string } | null;
       if (!response.ok) {
-        // Otro equipo la creó recién: pedirla en vez de crearla.
+        // Otro equipo ya cargó datos con su clave: pedirla en vez de crear otra.
+        if (response.status === 422) setCanClaim(false);
         setGate({
           step: response.status === 422 ? 'enter-key' : 'create-key',
           error: body?.message ?? `El servidor respondió ${response.status}.`,
@@ -130,22 +147,42 @@ export function CloudGate({ children }: { children: ReactNode }) {
         ) : gate.step === 'create-key' ? (
           <CreateKey error={gate.error} onSubmit={createKey} />
         ) : (
-          <EnterKey error={gate.error} onSubmit={async (key) => setGate(await enter(key.trim()))} />
+          <EnterKey
+            error={gate.error}
+            onSubmit={async (key) => setGate(await enter(key.trim()))}
+            onCreateNew={canClaim ? () => setGate({ step: 'create-key', error: null }) : null}
+          />
         )}
       </div>
     </div>
   );
 }
 
-function CreateKey({
-  error,
-  onSubmit,
-}: {
-  error: string | null;
-  onSubmit: (key: string, repeat: string) => void;
-}) {
+/** Campo de clave con «Mostrar»: sin mayúscula automática ni autocorrector del celular. */
+function KeyInput({
+  visible,
+  onToggle,
+  ...props
+}: ComponentProps<'input'> & { visible: boolean; onToggle: () => void }) {
+  return (
+    <div className="flex gap-2">
+      <Input
+        {...props}
+        type={visible ? 'text' : 'password'}
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
+      />
+      <Button type="button" variant="outline" onClick={onToggle} aria-pressed={visible}>
+        {visible ? <EyeOff /> : <Eye />} {visible ? 'Ocultar' : 'Mostrar'}
+      </Button>
+    </div>
+  );
+}
+
+function CreateKey({ error, onSubmit }: { error: string | null; onSubmit: (key: string) => void }) {
   const [key, setKey] = useState('');
-  const [repeat, setRepeat] = useState('');
+  const [visible, setVisible] = useState(true);
   return (
     <Card>
       <CardHeader>
@@ -153,8 +190,9 @@ function CreateKey({
           <CloudCheck className="size-5" aria-hidden /> La nube está lista
         </CardTitle>
         <CardDescription>
-          Cree la clave de acceso de la empresa. Desde ahora, lo que se agregue en cualquier
-          computador o teléfono se guarda en la nube y se ve en todos.
+          Invente aquí la clave de acceso de la empresa (no es la contraseña de Render ni la de
+          GitHub). Desde ahora, lo que se agregue en cualquier computador o teléfono se guarda en la
+          nube y se ve en todos.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -162,36 +200,27 @@ function CreateKey({
           className="grid gap-3 text-sm"
           onSubmit={(e) => {
             e.preventDefault();
-            onSubmit(key, repeat);
+            onSubmit(key);
           }}
         >
-          <label className="grid gap-1.5">
-            <span className="font-medium">Clave de acceso (mínimo 6 caracteres)</span>
-            <Input
-              id="cloud-new-key"
-              type="password"
-              autoComplete="new-password"
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-            />
+          <label className="font-medium" htmlFor="cloud-new-key">
+            Nueva clave (mínimo 6 caracteres)
           </label>
-          <label className="grid gap-1.5">
-            <span className="font-medium">Repita la clave</span>
-            <Input
-              id="cloud-new-key-repeat"
-              type="password"
-              autoComplete="new-password"
-              value={repeat}
-              onChange={(e) => setRepeat(e.target.value)}
-            />
-          </label>
+          <KeyInput
+            id="cloud-new-key"
+            autoComplete="new-password"
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            visible={visible}
+            onToggle={() => setVisible((v) => !v)}
+          />
           {error && <StatusLabel status="critical">{error}</StatusLabel>}
-          <Button type="submit">
+          <Button type="submit" disabled={key.trim().length === 0}>
             <KeyRound /> Crear clave y entrar
           </Button>
           <p className="text-xs text-muted-foreground">
-            Guárdela: se pide una vez en cada equipo. Los conductores no la escriben: reciben un
-            enlace que ya la trae («Flota y bodega»).
+            Anótela: se pide una vez en cada equipo y no importan mayúsculas ni minúsculas. Los
+            conductores no la escriben: reciben un enlace que ya la trae («Flota y bodega»).
           </p>
         </form>
       </CardContent>
@@ -202,12 +231,15 @@ function CreateKey({
 function EnterKey({
   error,
   onSubmit,
+  onCreateNew,
 }: {
   error: string | null;
   onSubmit: (key: string) => Promise<void>;
+  onCreateNew: (() => void) | null;
 }) {
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
+  const [visible, setVisible] = useState(false);
   return (
     <Card>
       <CardHeader>
@@ -215,8 +247,8 @@ function EnterKey({
           <KeyRound className="size-5" aria-hidden /> Clave de acceso
         </CardTitle>
         <CardDescription>
-          Ingrese la clave de la empresa para ver los datos guardados en la nube. Se pide una sola
-          vez en este equipo.
+          Ingrese la clave de la empresa que se creó en esta app (no es la contraseña de Render ni
+          la de GitHub). Se pide una sola vez en este equipo.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -228,17 +260,29 @@ function EnterKey({
             void onSubmit(key).finally(() => setBusy(false));
           }}
         >
-          <Input
+          <KeyInput
             id="cloud-key"
-            type="password"
+            aria-label="Clave de acceso"
             autoComplete="current-password"
             value={key}
             onChange={(e) => setKey(e.target.value)}
+            visible={visible}
+            onToggle={() => setVisible((v) => !v)}
           />
           {error && <StatusLabel status="critical">{error}</StatusLabel>}
           <Button type="submit" disabled={busy || key.trim().length === 0}>
             {busy ? <LoaderCircle className="animate-spin" /> : <LogIn />} Entrar
           </Button>
+          {onCreateNew && (
+            <div className="grid gap-2 border-t pt-3">
+              <p className="text-muted-foreground">
+                ¿No recuerda la clave? La nube todavía no tiene datos, así que puede crear otra.
+              </p>
+              <Button type="button" variant="outline" onClick={onCreateNew}>
+                <KeyRound /> Crear una clave nueva
+              </Button>
+            </div>
+          )}
         </form>
       </CardContent>
     </Card>

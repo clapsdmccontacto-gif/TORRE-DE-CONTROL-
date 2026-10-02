@@ -206,11 +206,13 @@ export default function App() {
         <header className="border-b bg-card px-4 py-4 sm:px-6">
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <span>Constructor Center</span>
-            <Badge variant="outline">
-              {apiMode === 'local'
-                ? 'Sin nube · datos sólo en este equipo'
-                : 'En la nube · datos compartidos entre equipos'}
-            </Badge>
+            {apiMode === 'local' ? (
+              <a href="#flota" title="Activar el guardado en la nube">
+                <Badge variant="outline">Sin nube · datos sólo en este equipo</Badge>
+              </a>
+            ) : (
+              <Badge variant="outline">En la nube · datos compartidos entre equipos</Badge>
+            )}
           </div>
           <h1 className="text-xl font-semibold">{current.label}</h1>
           {current.description && (

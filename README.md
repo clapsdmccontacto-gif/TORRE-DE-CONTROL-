@@ -563,13 +563,18 @@ un solo servicio) y el blueprint de Render (`render.yaml`: el servicio y una bas
 PostgreSQL gratuita donde quedan los datos de la empresa):
 
 1. Abrir el enlace [Activar en Render](https://render.com/deploy?repo=https://github.com/clapsdmccontacto-gif/TORRE-DE-CONTROL-)
-   (o en render.com: *New → Blueprint* → este repositorio) y entrar con *Sign in with
-   GitHub* (gratis).
+   (o en render.com: *New → Blueprint* → este repositorio) y entrar con el botón **GitHub**
+   (gratis; no se escribe ninguna contraseña en Render).
 2. Tocar *Apply*. Render crea la base de datos y el servicio (la primera vez tarda unos
    minutos).
 3. Abrir la app (el enlace de GitHub Pages o la dirección de Render): se conecta sola y pide
-   **crear la clave de acceso de la empresa** (sólo la primera vez; se guarda derivada con
-   scrypt). Lo cargado antes en ese equipo sin nube se sube solo.
+   **inventar la clave de acceso de la empresa** (no es la contraseña de Render ni de
+   GitHub; no distingue mayúsculas y se guarda derivada con scrypt). Lo cargado antes en
+   ese equipo sin nube se sube solo. Mientras la nube no tenga datos, la pantalla de la
+   clave ofrece «Crear una clave nueva» (por si la primera se escribió mal); si se olvida
+   cuando ya hay datos, se fija otra con la variable `ACCESS_KEY` en *Render → Environment*.
+   Si Render le dio al servicio otra dirección, se pega en *Flota y bodega* («Conectar»);
+   los enlaces para compartir la llevan incluida.
 4. En *Flota y bodega* están los enlaces con la clave incluida: uno para los teléfonos de
    los conductores (`#conductor?clave=…`) y otro para otros computadores (`#mapa?clave=…`).
    Quien abre el enlace normal escribe la clave una vez.
@@ -578,7 +583,7 @@ La API exige la clave en `x-torre-key` (o `?key=` en el flujo en vivo); 10 inten
 bloquean esa IP por 10 minutos. La app en GitHub Pages llama a la API desde otro dominio:
 `CORS_ORIGINS` (por defecto `https://clapsdmccontacto-gif.github.io`). La dirección que la
 app busca está en `frontend/src/lib/cloud.ts` y depende del nombre del servicio en
-`render.yaml`: si Render le agregara un sufijo, corregirla ahí (o `VITE_CLOUD_URL`).
+`render.yaml` (o `VITE_CLOUD_URL`); si Render le agregara un sufijo, basta pegarla en la app.
 
 Notas: el plan gratuito de Render duerme tras 15 minutos sin uso (la primera visita tarda
 cerca de un minuto; mientras un conductor envía su GPS no duerme). La base PostgreSQL
