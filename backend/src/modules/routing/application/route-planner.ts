@@ -199,6 +199,17 @@ export class RoutePlanner {
     return published;
   }
 
+  /** Camión y posición de cada pedido en el plan publicado (prioridad de bodega y carga). */
+  routeOrder(): Map<string, { plate: string; position: number }> {
+    const map = new Map<string, { plate: string; position: number }>();
+    for (const route of this.activePlan()?.routes ?? []) {
+      route.stops.forEach((stop, i) =>
+        map.set(stop.deliveryId, { plate: route.unitPlate, position: i + 1 }),
+      );
+    }
+    return map;
+  }
+
   activePlan(): RoutePlan | null {
     return this.activeId ? (this.plans.get(this.activeId) ?? null) : null;
   }

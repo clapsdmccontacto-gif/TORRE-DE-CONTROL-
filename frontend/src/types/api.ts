@@ -23,6 +23,14 @@ import type {
 } from '@core/modules/epod/domain/delivery-proof';
 import type { OrderTrack } from '@core/modules/fulfillment/domain/order-status';
 import type {
+  PickMonitor,
+  PickQueueItem,
+  PickView,
+  ScanResult,
+} from '@core/modules/picking/application/picking-desk';
+import type { CartType } from '@core/modules/picking/domain/cart';
+import type { ShortageReason } from '@core/modules/picking/domain/pick-task';
+import type {
   DriverSession,
   FleetSnapshot,
   IngestResult,
@@ -142,6 +150,18 @@ export type {
   DeliverySubmission,
 } from '@core/modules/epod/domain/delivery-proof';
 export type { OrderStatus, OrderTrack } from '@core/modules/fulfillment/domain/order-status';
+export type {
+  PickAlert,
+  PickEvent,
+  PickMonitor,
+  PickMonitorItem,
+  PickQueueItem,
+  PickView,
+  ScanResult,
+} from '@core/modules/picking/application/picking-desk';
+export type { PickLine, ShortageReason } from '@core/modules/picking/domain/pick-task';
+export type { CartType } from '@core/modules/picking/domain/cart';
+export type { MixViolation } from '@core/modules/picking/domain/mix-validator';
 
 export interface DeliveryProofFilter {
   /** Desde / hasta (ISO 8601). */
@@ -227,6 +247,34 @@ export interface TorreApi {
   deliveryImage(proofId: string, imageId: string): Promise<string>;
   /** Estado e historial de los pedidos que ya se movieron (los demás, PENDIENTE). */
   orderTracks(): Promise<OrderTrack[]>;
+
+  // Bodega: picking con escaneo.
+  pickingQueue(): Promise<PickQueueItem[]>;
+  pickingOrder(orderId: string): Promise<PickView>;
+  claimPick(orderId: string, input: { operator: string; device: string | null }): Promise<PickView>;
+  releasePick(orderId: string, input: { operator: string; force?: boolean }): Promise<PickView>;
+  /** Una lectura (idempotente por `id`, generado en el equipo). */
+  scanPick(
+    orderId: string,
+    input: {
+      id: string;
+      code: string;
+      operator: string;
+      device: string | null;
+      cartType: CartType;
+    },
+  ): Promise<ScanResult>;
+  undoPick(orderId: string, input: { id: string; operator: string }): Promise<PickView>;
+  closePick(
+    orderId: string,
+    input: {
+      operator: string;
+      shortages: { sku: string; reason: ShortageReason; note: string | null }[];
+    },
+  ): Promise<PickView>;
+  pickingMonitor(): Promise<PickMonitor>;
+  /** Monitor en vivo; devuelve la función para dejar de escuchar. */
+  subscribePicking(onSnapshot: (monitor: PickMonitor) => void, onError?: () => void): () => void;
   deviceTrack(sessionId: string): Promise<TrackResponse>;
   liveFleet(): Promise<FleetSnapshot>;
   /** Fotos de la flota en vivo; devuelve la función para dejar de escuchar. */

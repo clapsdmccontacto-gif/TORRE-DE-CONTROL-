@@ -1,11 +1,11 @@
 /**
- * Los equipos que abren el enlace del conductor (o, más adelante, el de bodega) quedan en
- * esa app: sin el menú de oficina, aunque cambie la dirección o se recargue la página.
+ * Los equipos que abren el enlace del conductor o el de bodega quedan en esa app: sin el
+ * menú de oficina, aunque cambie la dirección o se recargue la página.
  */
-export type DeviceApp = 'conductor';
+export type DeviceApp = 'conductor' | 'bodega';
 
 const STORAGE = 'torre-control.device-app';
-const APPS: readonly DeviceApp[] = ['conductor'];
+const APPS: readonly DeviceApp[] = ['conductor', 'bodega'];
 
 export function isDeviceApp(value: string | null | undefined): value is DeviceApp {
   return APPS.includes(value as DeviceApp);

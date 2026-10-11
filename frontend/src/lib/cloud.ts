@@ -89,8 +89,8 @@ export function setConnectedCloud(origin: string): void {
 }
 
 /**
- * Enlace a esta misma app con la clave (y la nube, si no es la de siempre) incluidas. El
- * del conductor deja al teléfono sólo en el modo conductor.
+ * Enlace a esta misma app con la clave (y la nube, si no es la de siempre) incluidas. Los
+ * del conductor y de bodega dejan al equipo sólo en esa app.
  */
 export function shareLink(route: string): string {
   const base = window.location.href.split('#')[0];

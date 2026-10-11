@@ -42,8 +42,12 @@ secretos (la única clave es la de TomTom de la empresa, ver abajo).
   `rut.ts`, `DeliveryRegistry`; imágenes en `delivery_images`, migración 006). El teléfono
   guarda los comprobantes sin señal en IndexedDB (`src/lib/delivery-outbox.ts`) y los reenvía
   (idempotentes por id). La entrega sólo se registra con comprobante.
-- Enlaces de conductor con `app=conductor`: el teléfono queda sólo en el modo conductor
-  (`src/lib/app-mode.ts`).
+- Bodega: `PickingDesk` (`picking/application/`, sin framework) con reglas puras en
+  `picking/domain/pick-task.ts`; cada lectura es un evento idempotente en `ops_records`
+  (`picking`); monitor en vivo por SSE (`/picking/stream`). La cámara usa `BarcodeDetector`
+  y, si no existe, `@zxing/browser` (import dinámico).
+- Enlaces de conductor y de bodega (`app=conductor` / `app=bodega`): el equipo queda sólo en
+  esa app (`src/lib/app-mode.ts`).
 - Sin datos de muestra ni simulación: la app parte vacía y la empresa carga bodega,
   camiones, productos, obras y pedidos (módulo `master-data`, un documento JSON en
   PostgreSQL `app_state` vía `DATABASE_URL`, o en memoria; en modo local, localStorage).

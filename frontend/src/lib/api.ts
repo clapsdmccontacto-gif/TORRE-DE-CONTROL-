@@ -1,9 +1,43 @@
 import { ApiError } from '@/lib/api-error';
 import { readCloudKey } from '@/lib/cloud';
 import { localApi } from '@/lib/local-api';
-import type { ApiErrorBody, FleetSnapshot, RoutePlan, TorreApi } from '@/types/api';
+import type { ApiErrorBody, FleetSnapshot, PickMonitor, RoutePlan, TorreApi } from '@/types/api';
 
 export { errorMessage } from '@/lib/api-error';
+
+/**
+ * Flujo en vivo (Server-Sent Events). EventSource no admite cabeceras: la clave va en la
+ * dirección. Reintenta solo si se corta la conexión, pero se rinde si el servidor no
+ * contesta (reinicio o despliegue en Render): entonces se vuelve a abrir cada 5 s.
+ */
+function subscribeStream<T>(
+  baseUrl: string,
+  onSnapshot: (data: T) => void,
+  onError?: () => void,
+): () => void {
+  const key = readCloudKey();
+  const url = `${baseUrl}${key ? `?key=${encodeURIComponent(key)}` : ''}`;
+  let source: EventSource | null = null;
+  let retry: ReturnType<typeof setTimeout> | null = null;
+  let stopped = false;
+  const open = () => {
+    const current = new EventSource(url);
+    source = current;
+    current.onmessage = (event) => onSnapshot(JSON.parse(event.data) as T);
+    current.onerror = () => {
+      onError?.();
+      if (current.readyState === EventSource.CLOSED && !stopped) {
+        retry = setTimeout(open, 5_000);
+      }
+    };
+  };
+  open();
+  return () => {
+    stopped = true;
+    if (retry) clearTimeout(retry);
+    source?.close();
+  };
+}
 
 function httpApi(baseUrl: string): TorreApi {
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -92,36 +126,22 @@ function httpApi(baseUrl: string): TorreApi {
       return `${baseUrl}/deliveries/${id(proofId)}/images/${id(imageId)}${key ? `?key=${encodeURIComponent(key)}` : ''}`;
     },
     orderTracks: () => request('/orders/tracks'),
+
+    pickingQueue: () => request('/picking/orders'),
+    pickingOrder: (orderId) => request(`/picking/orders/${id(orderId)}`),
+    claimPick: (orderId, input) => post(`/picking/orders/${id(orderId)}/claim`, input),
+    releasePick: (orderId, input) => post(`/picking/orders/${id(orderId)}/release`, input),
+    scanPick: (orderId, input) => post(`/picking/orders/${id(orderId)}/scans`, input),
+    undoPick: (orderId, input) => post(`/picking/orders/${id(orderId)}/undo`, input),
+    closePick: (orderId, input) => post(`/picking/orders/${id(orderId)}/close`, input),
+    pickingMonitor: () => request('/picking/monitor'),
+    subscribePicking: (onSnapshot, onError) =>
+      subscribeStream<PickMonitor>(`${baseUrl}/picking/stream`, onSnapshot, onError),
     deviceTrack: (sessionId) =>
       request(`/tracking/sessions/${encodeURIComponent(sessionId)}/track`),
     liveFleet: () => request('/tracking/live'),
-    subscribeFleet: (onSnapshot, onError) => {
-      // EventSource no admite cabeceras: la clave va en la dirección. Reintenta solo si se
-      // corta la conexión, pero se rinde si el servidor no contesta (reinicio o despliegue
-      // en Render): entonces se vuelve a abrir cada 5 s.
-      const key = readCloudKey();
-      const url = `${baseUrl}/tracking/stream${key ? `?key=${encodeURIComponent(key)}` : ''}`;
-      let source: EventSource | null = null;
-      let retry: ReturnType<typeof setTimeout> | null = null;
-      let stopped = false;
-      const open = () => {
-        const current = new EventSource(url);
-        source = current;
-        current.onmessage = (event) => onSnapshot(JSON.parse(event.data) as FleetSnapshot);
-        current.onerror = () => {
-          onError?.();
-          if (current.readyState === EventSource.CLOSED && !stopped) {
-            retry = setTimeout(open, 5_000);
-          }
-        };
-      };
-      open();
-      return () => {
-        stopped = true;
-        if (retry) clearTimeout(retry);
-        source?.close();
-      };
-    },
+    subscribeFleet: (onSnapshot, onError) =>
+      subscribeStream<FleetSnapshot>(`${baseUrl}/tracking/stream`, onSnapshot, onError),
   };
 }
 

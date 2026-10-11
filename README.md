@@ -601,6 +601,39 @@ abre el de ese pedido. En modo local los comprobantes quedan en el navegador.
 Espacio: cada entrega ocupa unos 100–400 KB (fotos y firma). La base gratuita de Render
 (1 GB) alcanza para unos miles; para operar todo el año conviene un plan pagado o Neon.
 
+### 5.8 Bodega: picking con código de barras y monitor en vivo
+
+**App de bodega** (`#bodega`; en *Flota y bodega* está su enlace, que trae la clave y deja
+al equipo sólo en esa app). Pensada para celular o pistola lectora:
+
+1. El operario escribe su nombre una vez (queda en el equipo) y ve los **pedidos por
+   preparar**, por fecha de entrega y orden de la ruta publicada, actualizados en vivo:
+   quién tiene cada uno y su avance. **Tomar pedido** lo reserva: nadie más lo puede tomar
+   (`PEDIDO_TOMADO`); *Liberar* lo deja para otro con lo ya escaneado.
+2. La **lista de picking** va ordenada por ubicación en bodega (orden natural: P2-R9 antes
+   que P2-R10) con lo pedido versus lo escaneado y una barra de avance. El carro se sugiere
+   solo (largos, plataforma pesada o modular) y se puede cambiar.
+3. **Escaneo**: con la pistola USB o Bluetooth (modo teclado: el campo queda siempre listo y
+   cada lectura termina en Enter), con la **cámara** del celular (lector del navegador; en
+   iPhone, ZXing) o escribiendo el código. Reglas (`picking/domain/pick-task.ts`, con
+   tests): código desconocido, producto que no es del pedido o pasarse de lo pedido son
+   error; una caja suma sus unidades; un UPC leído como EAN-13 es el mismo producto; el SKU
+   escrito a mano vale una unidad. Sonido y vibración distintos para correcto y error;
+   *Deshacer último*. Si el carro junta una **mezcla prohibida** o se pasa de carga, lo avisa
+   (reglas de mezcla, sección 5.1).
+4. **Cerrar**: completo → *PICKEADO*; con faltantes, cada uno con su motivo (sin stock,
+   dañado u otro, explicado) → *PICKEADO_PARCIAL*.
+
+Cada lectura es un evento guardado (pedido, SKU, código, unidades, operario, hora y equipo,
+también las rechazadas) con un id generado en el equipo: reintentarla no la duplica
+(`PickingDesk`, registros `picking` en `ops_records`; en modo local, el navegador).
+
+**Monitor de picking** (`#picking`, torre): totales (por preparar, en picking, listos, con
+faltantes) y cada pedido con estado, operario, avance, tiempo desde que se tomó, faltantes
+y alertas (*atrasado* si venció su fecha de entrega, *demorado* si lleva más de 45 min en
+picking, *con faltantes*). Se actualiza en vivo por Server-Sent Events
+(`/picking/stream`); la torre puede liberar un pedido tomado.
+
 ### Otros endpoints
 
 | Método | Ruta | Uso |
@@ -632,6 +665,10 @@ Espacio: cada entrega ocupa unos 100–400 KB (fotos y firma). La base gratuita 
 | GET | `/api/v1/deliveries` · `/deliveries/:id` | Comprobantes (filtros `from`, `to`, `plate`, `outcome`, `order`) · uno |
 | GET | `/api/v1/deliveries/:id/images/:imageId` | Firma o foto (`?key=` para las etiquetas `<img>`) |
 | GET | `/api/v1/orders/tracks` | Estado e historial de los pedidos |
+| GET | `/api/v1/picking/orders` · `/picking/orders/:id` | Pedidos por preparar · lista de picking de uno |
+| POST | `/api/v1/picking/orders/:id/claim` · `/release` | Tomar · liberar un pedido (`force` desde la torre) |
+| POST | `/api/v1/picking/orders/:id/scans` · `/undo` · `/close` | Lectura (idempotente por `id`) · deshacer · cerrar con faltantes |
+| GET | `/api/v1/picking/monitor` · `/picking/stream` | Monitor de picking (foto · flujo SSE) |
 | GET | `/api/v1/tracking/sessions/:id/track` | Trayecto recorrido y resumen |
 | GET | `/api/v1/tracking/live` · `/api/v1/tracking/stream` | Flota en vivo (foto · flujo SSE) |
 
@@ -640,7 +677,7 @@ Errores: `400 SOLICITUD_INVALIDA` con detalle por campo (Zod) y `422` para regla
 `PATENTE_INVALIDA`, `SIN_BODEGA`, `SIN_VEHICULOS`, `OBRA_CON_PEDIDOS`, `PRODUCTO_EN_USO`,
 `SESION_DESCONOCIDA`, `PARADA_DESCONOCIDA`, `CODIGO_INVALIDO`, `CODIGO_DUPLICADO`,
 `COMPROBANTE_INVALIDO`, `RUTA_DESCONOCIDA`, `PEDIDO_FUERA_DE_RUTA`, `PEDIDO_YA_ENTREGADO`,
-`TRANSICION_INVALIDA`,
+`TRANSICION_INVALIDA`, `PEDIDO_TOMADO`, `PEDIDO_NO_TOMADO`, `FALTAN_PRODUCTOS`, `PICKING_VACIO`,
 `IMPORTACION_INVALIDA`, `NUBE_YA_CONFIGURADA`), `401 CLAVE_INCORRECTA`,
 `403 NUBE_SIN_CLAVE` y
 `429 DEMASIADOS_INTENTOS`.

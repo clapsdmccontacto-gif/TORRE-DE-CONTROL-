@@ -20,6 +20,7 @@ import {
 import { proofOrderOf, type DeliveryProof } from '@core/modules/epod/domain/delivery-proof';
 import { OrderTracker } from '@core/modules/fulfillment/application/order-tracker';
 import { isPlannable } from '@core/modules/fulfillment/domain/order-status';
+import { PickingDesk } from '@core/modules/picking/application/picking-desk';
 import { RoutePlanner } from '@core/modules/routing/application/route-planner';
 import { TrackingHub, stopDetailsOf } from '@core/modules/tracking/application/tracking-hub';
 import { ApiError } from '@/lib/api-error';
@@ -104,6 +105,7 @@ interface LocalEngine {
   hub: TrackingHub;
   tracker: OrderTracker;
   registry: DeliveryRegistry;
+  desk: PickingDesk;
 }
 
 let localEngine: LocalEngine | null = null;
@@ -152,7 +154,14 @@ function engine(): LocalEngine {
       hub.completeStop(proof.sessionId, proof.orderId, proof.outcome);
     },
   });
-  localEngine = { data, planner, hub, tracker, registry };
+  const desk = new PickingDesk({
+    orders: () => data.orders(),
+    products: () => data.products(),
+    tracker,
+    routeOrder: () => planner.routeOrder(),
+    store: localRecords,
+  });
+  localEngine = { data, planner, hub, tracker, registry, desk };
   return localEngine;
 }
 
@@ -164,6 +173,7 @@ async function ready() {
     current.planner.ready,
     current.hub.ready,
     current.tracker.ready,
+    current.desk.ready,
   ]);
   return current;
 }
@@ -246,6 +256,23 @@ export const localApi: TorreApi = {
       return `data:${image.mime};base64,${image.base64}`;
     }),
   orderTracks: async () => (await ready()).tracker.all(),
+
+  pickingQueue: async () => (await ready()).desk.queue(),
+  pickingOrder: (orderId) => run(async () => (await ready()).desk.view(orderId)),
+  claimPick: (orderId, input) => run(async () => (await ready()).desk.claim({ orderId, ...input })),
+  releasePick: (orderId, input) =>
+    run(async () => (await ready()).desk.release({ orderId, ...input })),
+  scanPick: (orderId, input) => run(async () => (await ready()).desk.scan({ orderId, ...input })),
+  undoPick: (orderId, input) => run(async () => (await ready()).desk.undo({ orderId, ...input })),
+  closePick: (orderId, input) => run(async () => (await ready()).desk.close({ orderId, ...input })),
+  pickingMonitor: async () => (await ready()).desk.monitor(),
+  subscribePicking: (onSnapshot) => {
+    const { desk } = engine();
+    const send = () => onSnapshot(desk.monitor());
+    const unsubscribe = desk.subscribe(send);
+    void ready().then(send);
+    return unsubscribe;
+  },
   deviceTrack: (sessionId) => run(async () => (await ready()).hub.track(sessionId)),
   liveFleet: async () => (await ready()).hub.snapshot(),
   subscribeFleet: (onSnapshot) => {

@@ -155,6 +155,10 @@ function VehiclesCard({
             label="Enlace para los teléfonos de los conductores (abre sólo el modo conductor: escriben su nombre y eligen el camión):"
             link={shareLink('conductor')}
           />
+          <ShareLink
+            label="Enlace para la bodega (abre sólo la app de picking: el operario escribe su nombre y prepara pedidos):"
+            link={shareLink('bodega')}
+          />
           {apiMode === 'http' && (
             <>
               <ShareLink

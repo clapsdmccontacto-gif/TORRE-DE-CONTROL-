@@ -1,6 +1,8 @@
 import {
   ClipboardCheck,
+  ClipboardList,
   HardHat,
+  ScanBarcode,
   Package,
   Warehouse,
   LoaderCircle,
@@ -22,6 +24,8 @@ import { SitesOrdersPage } from '@/features/master-data/SitesOrdersPage';
 import { RoutePlannerPage } from '@/features/routing/RoutePlannerPage';
 import { DriverPage } from '@/features/tracking/DriverPage';
 import { LiveMapPage } from '@/features/tracking/LiveMapPage';
+import { PickingMonitorPage } from '@/features/warehouse/PickingMonitorPage';
+import { WarehouseApp } from '@/features/warehouse/WarehouseApp';
 import { api, apiMode, errorMessage } from '@/lib/api';
 import { readDeviceApp, saveDeviceApp } from '@/lib/app-mode';
 import { cn } from '@/lib/utils';
@@ -56,6 +60,23 @@ const NAV: { group: string; items: NavItem[] }[] = [
         icon: HardHat,
         route: 'obras',
         description: 'Dónde se entrega y qué se entrega: lo que planifica el optimizador.',
+      },
+    ],
+  },
+  {
+    group: 'Bodega',
+    items: [
+      {
+        label: 'Monitor de picking',
+        icon: ClipboardList,
+        route: 'picking',
+        description: 'Qué falta preparar, quién prepara cada pedido y qué quedó listo, en vivo.',
+      },
+      {
+        label: 'App de bodega',
+        icon: ScanBarcode,
+        route: 'bodega',
+        description: 'Picking con pistola o cámara para los operarios.',
       },
     ],
   },
@@ -142,6 +163,47 @@ export default function App() {
     items.find((item) => item.route === DEFAULT_ROUTE)!;
   const needsCatalog = !deviceApp && current.route === 'cubicaje';
   const { catalog, error } = useCatalog(needsCatalog);
+
+  if (deviceApp === 'bodega' || (!deviceApp && current.route === 'bodega')) {
+    const leaveWarehouseApp = () => {
+      saveDeviceApp(null);
+      setDeviceApp(null);
+      window.location.hash = DEFAULT_ROUTE;
+    };
+    return (
+      <div className="min-h-svh">
+        <header className="flex items-center justify-between gap-3 border-b bg-card px-4 py-3">
+          <div className="flex items-center gap-2">
+            <ScanBarcode className="size-5" aria-hidden />
+            <div>
+              <p className="font-semibold leading-tight">App de bodega</p>
+              <p className="text-xs text-muted-foreground">Torre de Control · Constructor Center</p>
+            </div>
+          </div>
+          {!deviceApp && (
+            <a
+              href="#picking"
+              className="text-sm text-muted-foreground underline-offset-4 hover:underline"
+            >
+              Torre de control
+            </a>
+          )}
+        </header>
+        <main className="grid gap-6 p-4">
+          <WarehouseApp />
+          {deviceApp && (
+            <button
+              type="button"
+              onClick={leaveWarehouseApp}
+              className="justify-self-center text-xs text-muted-foreground underline-offset-4 hover:underline"
+            >
+              ¿No es de bodega? Abrir la app completa
+            </button>
+          )}
+        </main>
+      </div>
+    );
+  }
 
   if (deviceApp === 'conductor' || current.route === 'conductor') {
     const leaveDriverApp = () => {
@@ -257,6 +319,7 @@ export default function App() {
           {current.route === 'rutas' && <RoutePlannerPage />}
           {current.route === 'mapa' && <LiveMapPage />}
           {current.route === 'entregas' && <DeliveriesPage />}
+          {current.route === 'picking' && <PickingMonitorPage />}
           {current.route === 'cubicaje' && catalog && catalog.products.length > 0 && (
             <CubicajePage products={catalog.products} />
           )}
