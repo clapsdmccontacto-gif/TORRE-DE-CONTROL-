@@ -1,4 +1,5 @@
 import type { INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DomainExceptionFilter } from './common/domain-exception.filter.js';
 import { AccessControl } from './modules/cloud/infrastructure/access-control.js';
 
@@ -12,6 +13,9 @@ export function corsOrigins(): string[] {
 
 /** Configuración compartida por main.ts y los tests e2e. */
 export function configureApp(app: INestApplication): INestApplication {
+  // Planillas importadas (miles de filas) y, más adelante, fotos de entrega: más que los
+  // 100 kB que acepta Express por defecto.
+  (app as NestExpressApplication).useBodyParser('json', { limit: '8mb' });
   app.enableCors({
     origin: corsOrigins(),
     methods: ['GET', 'POST', 'PUT', 'DELETE'],

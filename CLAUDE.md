@@ -32,6 +32,11 @@ secretos (la única clave es la de TomTom de la empresa, ver abajo).
   `store`; en modo local, localStorage). Cada caso de uso escribe con una `WriteQueue` y los
   controladores esperan `flush()` antes de responder. La geocerca sólo sugiere la llegada:
   la entrega la registra el conductor (`completeStop`).
+- Importación desde Excel/CSV: la lectura de filas es dominio puro
+  (`master-data/domain/{spreadsheet,import-products,import-orders}.ts`); el navegador sólo lee
+  el archivo (`src/lib/spreadsheet-file.ts`: `read-excel-file`/`write-excel-file`, no el
+  paquete `xlsx`) y el servidor vuelve a validar todo en `importProducts`/`importOrders`
+  (todo o nada). Geocodificación con `TomTomGeocoder` desde el navegador (`src/lib/geocoding.ts`).
 - Enlaces de conductor con `app=conductor`: el teléfono queda sólo en el modo conductor
   (`src/lib/app-mode.ts`).
 - Sin datos de muestra ni simulación: la app parte vacía y la empresa carga bodega,

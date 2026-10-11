@@ -56,6 +56,8 @@ function httpApi(baseUrl: string): TorreApi {
     removeSite: (siteId) => remove(`/master-data/sites/${id(siteId)}`),
     saveOrder: (order) => post('/master-data/orders', order),
     removeOrder: (orderId) => remove(`/master-data/orders/${id(orderId)}`),
+    importProducts: (products) => post('/master-data/import/products', { products }),
+    importOrders: (input) => post('/master-data/import/orders', input),
 
     products: () => request('/catalog/products'),
     cubicaje: (payload) => post('/load-planning/cubicaje', payload),

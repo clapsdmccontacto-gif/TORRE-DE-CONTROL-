@@ -1,5 +1,5 @@
 import { HANDLING_CLASSES } from '@core/modules/catalog/domain/product';
-import { Package, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
+import { Barcode, MapPin, Package, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { StatusBanner } from '@/components/status';
 import { Badge } from '@/components/ui/badge';
@@ -8,7 +8,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input, NativeSelect } from '@/components/ui/input';
 import { api } from '@/lib/api';
 import { HANDLING_CLASS_LABEL, formatKg } from '@/lib/format';
-import type { HandlingClass, MasterDataView, Product } from '@/types/api';
+import type { HandlingClass, MasterDataView, Product, ProductBarcode } from '@/types/api';
+import { ImportProductsCard } from './import/ImportProductsCard';
 import { useMasterData } from './use-master-data';
 
 type ProductDraft = Omit<Product, 'unitVolumeM3'>;
@@ -24,6 +25,8 @@ const EMPTY: ProductDraft = {
   heightCm: 0,
   isFragile: false,
   requiresMechanicalUnload: false,
+  barcodes: [],
+  binLocation: null,
 };
 
 const HANDLING_HINT: Record<HandlingClass, string> = {
@@ -37,12 +40,13 @@ const HANDLING_HINT: Record<HandlingClass, string> = {
 
 /** Catálogo con los datos logísticos que usan picking, cubicaje y pedidos. */
 export function ProductsPage() {
-  const { data, error, busy, change } = useMasterData();
+  const { data, error, busy, change, replace } = useMasterData();
   const [draft, setDraft] = useState<ProductDraft>(EMPTY);
   const editing = data?.products.some((p) => p.sku === draft.sku.trim().toUpperCase()) ?? false;
 
   async function save() {
-    if (await change(() => api.saveProduct(draft))) setDraft(EMPTY);
+    const barcodes = (draft.barcodes ?? []).filter((b) => b.code.trim() !== '');
+    if (await change(() => api.saveProduct({ ...draft, barcodes }))) setDraft(EMPTY);
   }
 
   return (
@@ -53,6 +57,7 @@ export function ProductsPage() {
             {error}
           </StatusBanner>
         )}
+        {data && <ImportProductsCard data={data} onImported={replace} />}
         <ProductList data={data} busy={busy} onEdit={setDraft} change={change} />
       </div>
 
@@ -134,6 +139,18 @@ export function ProductsPage() {
               value={draft.heightCm}
               onChange={(heightCm) => setDraft({ ...draft, heightCm })}
             />
+            <Field label="Ubicación en bodega (opcional)" className="col-span-2">
+              <Input
+                id="product-bin"
+                value={draft.binLocation ?? ''}
+                placeholder="Ej.: P3-R2-N1 (pasillo-rack-nivel)"
+                onChange={(e) => setDraft({ ...draft, binLocation: e.target.value || null })}
+              />
+            </Field>
+            <BarcodeEditor
+              value={draft.barcodes ?? []}
+              onChange={(barcodes) => setDraft({ ...draft, barcodes })}
+            />
             <label className="col-span-2 flex items-center gap-2">
               <input
                 type="checkbox"
@@ -210,7 +227,24 @@ function ProductList({
               <Badge variant="outline">{HANDLING_CLASS_LABEL[p.handlingClass]}</Badge>
               {p.isFragile && <Badge variant="secondary">Frágil</Badge>}
               {p.requiresMechanicalUnload && <Badge variant="secondary">Descarga con grúa</Badge>}
+              {p.binLocation && (
+                <Badge variant="outline">
+                  <MapPin aria-hidden /> {p.binLocation}
+                </Badge>
+              )}
             </span>
+            {(p.barcodes ?? []).length > 0 && (
+              <span className="flex min-w-0 items-center gap-1 text-muted-foreground">
+                <Barcode className="size-4 shrink-0" aria-label="Códigos de barra" />
+                <span className="min-w-0 truncate tabular-nums">
+                  {(p.barcodes ?? [])
+                    .map((b) =>
+                      b.unitsPerScan > 1 ? `${b.code} (caja de ${b.unitsPerScan})` : b.code,
+                    )
+                    .join(' · ')}
+                </span>
+              </span>
+            )}
           </span>
           <span className="flex shrink-0 gap-1">
             <Button
@@ -280,5 +314,71 @@ function NumberField({
         onChange={(e) => onChange(Number(e.target.value))}
       />
     </Field>
+  );
+}
+
+/** Códigos de barra del producto: el de la unidad y, si se escanean cajas, el de la caja. */
+function BarcodeEditor({
+  value,
+  onChange,
+}: {
+  value: ProductBarcode[];
+  onChange: (barcodes: ProductBarcode[]) => void;
+}) {
+  const update = (index: number, patch: Partial<ProductBarcode>) =>
+    onChange(value.map((b, i) => (i === index ? { ...b, ...patch } : b)));
+  return (
+    <fieldset className="col-span-2 grid min-w-0 gap-2">
+      <legend className="mb-1.5 font-medium">Códigos de barra (opcional)</legend>
+      {value.map((barcode, index) => (
+        <div key={index} className="grid grid-cols-[minmax(0,1fr)_6rem_auto] items-end gap-2">
+          <label className="grid min-w-0 gap-1">
+            <span className="text-xs text-muted-foreground">Código</span>
+            <Input
+              id={`product-barcode-${index}`}
+              value={barcode.code}
+              inputMode="text"
+              autoComplete="off"
+              placeholder="EAN o etiqueta"
+              onChange={(e) => update(index, { code: e.target.value })}
+            />
+          </label>
+          <label className="grid min-w-0 gap-1">
+            <span className="text-xs text-muted-foreground">Unidades</span>
+            <Input
+              type="number"
+              min={1}
+              step={1}
+              inputMode="numeric"
+              className="tabular-nums"
+              value={barcode.unitsPerScan || ''}
+              onChange={(e) => update(index, { unitsPerScan: Number(e.target.value) })}
+            />
+          </label>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Quitar código"
+            onClick={() => onChange(value.filter((_, i) => i !== index))}
+          >
+            <X />
+          </Button>
+        </div>
+      ))}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="justify-self-start"
+        onClick={() => onChange([...value, { code: '', unitsPerScan: 1 }])}
+      >
+        <Barcode /> Agregar código
+      </Button>
+      <p className="text-xs text-muted-foreground">
+        «Unidades»: cuántas suma cada lectura (1 para la unidad; p. ej. 40 para el código de la
+        caja). Puede escanear el código con una pistola en el campo.
+      </p>
+    </fieldset>
   );
 }

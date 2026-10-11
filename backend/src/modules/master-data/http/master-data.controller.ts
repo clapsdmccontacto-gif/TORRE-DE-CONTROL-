@@ -3,12 +3,16 @@ import { ZodValidationPipe } from '../../../common/zod-validation.pipe.js';
 import { MasterData } from '../application/master-data.js';
 import {
   depotSchema,
+  orderImportSchema,
   orderSchema,
+  productImportSchema,
   productSchema,
   siteSchema,
   vehicleSchema,
   type DepotRequest,
+  type OrderImportRequest,
   type OrderRequest,
+  type ProductImportRequest,
   type ProductRequest,
   type SiteRequest,
   type VehicleRequest,
@@ -71,5 +75,19 @@ export class MasterDataController {
   @Delete('orders/:id')
   removeOrder(@Param('id') id: string) {
     return this.data.removeOrder(id);
+  }
+
+  /** Productos desde planilla: todo o nada (422 IMPORTACION_INVALIDA con el detalle). */
+  @Post('import/products')
+  @HttpCode(200)
+  importProducts(@Body(new ZodValidationPipe(productImportSchema)) body: ProductImportRequest) {
+    return this.data.importProducts(body.products);
+  }
+
+  /** Pedidos desde planilla, con sus obras nuevas o actualizadas: todo o nada. */
+  @Post('import/orders')
+  @HttpCode(200)
+  importOrders(@Body(new ZodValidationPipe(orderImportSchema)) body: OrderImportRequest) {
+    return this.data.importOrders(body);
   }
 }

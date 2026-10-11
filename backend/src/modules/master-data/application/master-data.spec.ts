@@ -81,6 +81,73 @@ describe('MasterData', () => {
     expect(data.view()).toMatchObject({ vehicles: [], products: [], sites: [], orders: [] });
   });
 
+  it('no deja que dos productos compartan un código de barra', async () => {
+    const data = make();
+    await data.saveProduct({ ...cement, barcodes: [{ code: '7802820005455', unitsPerScan: 1 }] });
+    const other = DEMO_PRODUCTS.find((p) => p.sku !== cement.sku)!;
+    await expect(
+      data.saveProduct({ ...other, barcodes: [{ code: '7802820005455', unitsPerScan: 1 }] }),
+    ).rejects.toMatchObject({ code: 'CODIGO_DUPLICADO' });
+  });
+
+  it('importa productos de una vez; si uno falla no importa ninguno', async () => {
+    const store = new MemoryStateStore();
+    const data = make(store);
+    await data.saveProduct(cement);
+    const [, second, third] = DEMO_PRODUCTS;
+    const result = await data.importProducts([{ ...cement, name: 'Cemento renombrado' }, second]);
+    expect(result).toMatchObject({ created: 1, updated: 1 });
+    expect(result.view.products.find((p) => p.sku === cement.sku)?.name).toBe('Cemento renombrado');
+
+    await expect(
+      data.importProducts([third, { ...second, unitWeightKg: -1 }]),
+    ).rejects.toMatchObject({
+      code: 'IMPORTACION_INVALIDA',
+      details: { errors: [{ index: 1, id: second.sku, message: expect.any(String) }] },
+    });
+    expect(data.view().products.map((p) => p.sku)).not.toContain(third.sku);
+  });
+
+  it('importa pedidos con sus obras nuevas y actualiza las existentes', async () => {
+    const data = make();
+    await data.saveProduct(cement);
+    const site = (await data.saveSite(siteInput)).sites[0];
+    const result = await data.importOrders({
+      sites: [
+        { ...site, address: 'Av. Alemania 1234', contactPhone: '+56 9 1234 5678' },
+        {
+          id: 'OBRA-NUEVA',
+          name: 'Casa Pérez',
+          commune: 'Nacimiento',
+          location: { lat: -37.5, lng: -72.6 },
+          hasUnloadingEquipment: false,
+          notifyEtaMinutes: 15,
+        },
+      ],
+      orders: [
+        {
+          id: 'nv-1',
+          siteId: site.id,
+          lines: [{ sku: cement.sku, quantity: 3 }],
+          deliveryDate: '2026-10-20',
+        },
+        { id: 'NV-2', siteId: 'OBRA-NUEVA', lines: [{ sku: cement.sku, quantity: 1 }] },
+      ],
+    });
+    expect(result).toMatchObject({ created: 2, updated: 0, sitesCreated: 1, sitesUpdated: 1 });
+    expect(result.view.sites.find((s) => s.id === site.id)?.address).toBe('Av. Alemania 1234');
+    expect(result.view.orders.find((o) => o.id === 'NV-1')).toMatchObject({
+      deliveryDate: '2026-10-20',
+    });
+
+    await expect(
+      data.importOrders({
+        sites: [],
+        orders: [{ id: 'NV-3', siteId: 'NO-EXISTE', lines: [{ sku: cement.sku, quantity: 1 }] }],
+      }),
+    ).rejects.toMatchObject({ code: 'IMPORTACION_INVALIDA' });
+  });
+
   it('guarda los cambios en orden aunque lleguen juntos', async () => {
     const saved: number[] = [];
     const store: StateStore = {

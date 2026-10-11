@@ -1,5 +1,6 @@
 import { DomainError } from '../../../common/domain-error.js';
 import { isValidLatLng, type LatLng } from '../../../common/geo.js';
+import { validateBarcodes } from '../../catalog/domain/barcode.js';
 import { HANDLING_CLASSES, type Product } from '../../catalog/domain/product.js';
 import type { VehicleType } from '../../load-planning/domain/vehicle.js';
 import type { DeliveryOrder, DeliverySite } from '../../routing/domain/delivery.js';
@@ -30,6 +31,10 @@ export interface OrderRecord {
   id: string;
   siteId: string;
   lines: OrderLineRecord[];
+  customerName?: string | null;
+  /** Fecha de entrega comprometida (AAAA-MM-DD). */
+  deliveryDate?: string | null;
+  notes?: string | null;
 }
 
 export interface MasterDataSnapshot {
@@ -58,6 +63,48 @@ function text(value: string, field: string, min: number, max: number): string {
     throw invalid('DATO_INVALIDO', `${field}: entre ${min} y ${max} caracteres.`);
   }
   return trimmed;
+}
+
+/** Texto opcional: vacío → null. */
+function optionalText(value: string | null | undefined, field: string, max: number): string | null {
+  const trimmed = (value ?? '').trim().replace(/\s+/g, ' ');
+  if (trimmed === '') return null;
+  if (trimmed.length > max) {
+    throw invalid('DATO_INVALIDO', `${field}: máximo ${max} caracteres.`);
+  }
+  return trimmed;
+}
+
+/** Teléfono opcional (ej. +56 9 1234 5678). */
+export function normalizePhone(value: string | null | undefined, field: string): string | null {
+  const phone = (value ?? '').trim().replace(/\s+/g, ' ');
+  if (phone === '') return null;
+  if (!/^\+?[\d\s-]{8,20}$/.test(phone)) {
+    throw invalid('TELEFONO_INVALIDO', `${field}: sólo números (ej. +56 9 1234 5678).`);
+  }
+  return phone;
+}
+
+/** Fecha AAAA-MM-DD válida (o null). */
+export function normalizeIsoDate(value: string | null | undefined, field: string): string | null {
+  const text = (value ?? '').trim();
+  if (text === '') return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  const date = match ? new Date(Date.UTC(+match[1], +match[2] - 1, +match[3])) : null;
+  if (!match || !date || date.getUTCDate() !== +match[3] || date.getUTCMonth() !== +match[2] - 1) {
+    throw invalid('FECHA_INVALIDA', `${field}: use una fecha válida (día-mes-año).`);
+  }
+  return text;
+}
+
+/** Ubicación en bodega: «p3 - r2 - n1» → «P3-R2-N1». */
+function binLocation(value: string | null | undefined): string | null {
+  const clean = (value ?? '').trim().toUpperCase().replace(/\s*-\s*/g, '-').replace(/\s+/g, ' ');
+  if (clean === '') return null;
+  if (!/^[A-Z0-9 .\-/]{1,20}$/.test(clean)) {
+    throw invalid('DATO_INVALIDO', 'Ubicación en bodega: hasta 20 letras, números o guiones.');
+  }
+  return clean;
 }
 
 function positive(value: number, field: string, max: number): number {
@@ -119,6 +166,8 @@ export function validateProduct(product: Product): Product {
     heightCm: positive(product.heightCm, 'Alto (cm)', 500),
     isFragile: Boolean(product.isFragile),
     requiresMechanicalUnload: Boolean(product.requiresMechanicalUnload),
+    barcodes: validateBarcodes(product.barcodes),
+    binLocation: binLocation(product.binLocation),
   };
 }
 
@@ -134,6 +183,9 @@ export function validateSite(site: DeliverySite): DeliverySite {
     location: location(site.location, 'Obra'),
     hasUnloadingEquipment: Boolean(site.hasUnloadingEquipment),
     notifyEtaMinutes: notify,
+    address: optionalText(site.address, 'Dirección', 160),
+    contactName: optionalText(site.contactName, 'Contacto en obra', 80),
+    contactPhone: normalizePhone(site.contactPhone, 'Teléfono del contacto'),
   };
 }
 
@@ -157,6 +209,9 @@ export function validateOrder(order: OrderRecord, data: MasterDataSnapshot): Ord
     id,
     siteId: order.siteId,
     lines: [...lines].map(([sku, quantity]) => ({ sku, quantity })),
+    customerName: optionalText(order.customerName, 'Cliente', 120),
+    deliveryDate: normalizeIsoDate(order.deliveryDate, 'Fecha de entrega'),
+    notes: optionalText(order.notes, 'Notas', 500),
   };
 }
 
@@ -178,7 +233,18 @@ export function resolveOrders(data: MasterDataSnapshot): DeliveryOrder[] {
       const product = products.get(l.sku);
       return product ? [{ product, quantity: l.quantity }] : [];
     });
-    return site && lines.length > 0 ? [{ id: order.id, site, lines }] : [];
+    return site && lines.length > 0
+      ? [
+          {
+            id: order.id,
+            site,
+            lines,
+            customerName: order.customerName ?? null,
+            deliveryDate: order.deliveryDate ?? null,
+            notes: order.notes ?? null,
+          },
+        ]
+      : [];
   });
 }
 

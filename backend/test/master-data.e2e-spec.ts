@@ -80,6 +80,72 @@ describe('Datos maestros (e2e)', () => {
     expect(cleared.body.vehicles).toEqual([]);
   });
 
+  it('importa productos y pedidos desde planilla, todo o nada', async () => {
+    const server = app.getHttpServer();
+    const base = DEMO_PRODUCTS[0];
+    // Más de 100 kB de JSON: una planilla grande entra completa.
+    const products = Array.from({ length: 1_200 }, (_, i) => ({
+      ...base,
+      sku: `IMP-${i}`,
+      name: `Producto importado número ${i} con nombre largo`,
+      binLocation: `P${i % 9}-R1`,
+    }));
+    products[0] = { ...products[0], barcodes: [{ code: '7802820005455', unitsPerScan: 1 }] };
+    const imported = await request(server)
+      .post('/api/v1/master-data/import/products')
+      .send({ products })
+      .expect(200);
+    expect(imported.body).toMatchObject({ created: 1_200, updated: 0 });
+
+    const rejected = await request(server)
+      .post('/api/v1/master-data/import/products')
+      .send({
+        products: [
+          { ...base, sku: 'IMP-NUEVO' },
+          { ...base, sku: 'IMP-OTRO', barcodes: [{ code: '7802820005455', unitsPerScan: 1 }] },
+        ],
+      })
+      .expect(422);
+    expect(rejected.body).toMatchObject({
+      code: 'IMPORTACION_INVALIDA',
+      details: { errors: [{ index: 1, id: 'IMP-OTRO' }] },
+    });
+    const after = await request(server).get('/api/v1/master-data').expect(200);
+    expect(after.body.products.map((p: { sku: string }) => p.sku)).not.toContain('IMP-NUEVO');
+
+    const orders = await request(server)
+      .post('/api/v1/master-data/import/orders')
+      .send({
+        sites: [
+          {
+            id: 'OBRA-IMPORTADA',
+            name: 'Casa Pérez',
+            commune: 'Nacimiento',
+            location: { lat: -37.5, lng: -72.6 },
+            address: 'Los Robles 45',
+            contactName: 'Ana',
+            contactPhone: '+56 9 2222 3333',
+          },
+        ],
+        orders: [
+          {
+            id: 'NV-IMP-1',
+            siteId: 'OBRA-IMPORTADA',
+            lines: [{ sku: 'IMP-1', quantity: 4 }],
+            customerName: 'Constructora Sur',
+            deliveryDate: '2026-10-20',
+          },
+        ],
+      })
+      .expect(200);
+    expect(orders.body).toMatchObject({ created: 1, sitesCreated: 1 });
+    expect(orders.body.view.orders.find((o: { id: string }) => o.id === 'NV-IMP-1')).toMatchObject(
+      { siteName: 'Casa Pérez', customerName: 'Constructora Sur', deliveryDate: '2026-10-20' },
+    );
+    const deliveries = await request(server).get('/api/v1/routing/deliveries').expect(200);
+    expect(deliveries.body.map((d: { id: string }) => d.id)).toContain('NV-IMP-1');
+  });
+
   it('valida lo que se ingresa', async () => {
     const server = app.getHttpServer();
     const plate = await request(server)

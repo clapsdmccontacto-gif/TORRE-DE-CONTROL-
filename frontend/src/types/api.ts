@@ -2,8 +2,14 @@
 // desde OpenAPI o moverlos a un paquete compartido para que no diverjan.
 
 import type { DeliveryView, RoutePlan } from '@core/modules/routing/application/route-planner';
+import type { ProductBarcode } from '@core/modules/catalog/domain/barcode';
 import type { RoadAdjustment } from '@core/modules/routing/domain/road-adjustment';
-import type { MasterDataView, SiteInput } from '@core/modules/master-data/application/master-data';
+import type {
+  ImportSummary,
+  MasterDataView,
+  OrderImportSummary,
+  SiteInput,
+} from '@core/modules/master-data/application/master-data';
 import type {
   Depot,
   OrderRecord,
@@ -30,6 +36,10 @@ export interface Product {
   heightCm: number;
   isFragile: boolean;
   requiresMechanicalUnload: boolean;
+  /** Códigos de barra (proveedor, caja) que lee el picking. */
+  barcodes?: ProductBarcode[];
+  /** Ubicación en bodega (pasillo-rack-nivel). */
+  binLocation?: string | null;
   unitVolumeM3: number;
 }
 
@@ -88,6 +98,8 @@ export interface ApiErrorBody {
   code: string;
   message: string;
   issues?: { path: string; message: string }[];
+  /** Detalle de reglas de negocio (p. ej. los errores de una importación). */
+  details?: unknown;
 }
 
 // --- Rutas y rastreo: mismos tipos que el backend (alias @core), sin copiarlos ---------
@@ -118,7 +130,14 @@ export type {
   TrackingEvent,
 } from '@core/modules/tracking/application/tracking-hub';
 
-export type { MasterDataView, SiteInput } from '@core/modules/master-data/application/master-data';
+export type {
+  ImportError,
+  ImportSummary,
+  MasterDataView,
+  OrderImportSummary,
+  SiteInput,
+} from '@core/modules/master-data/application/master-data';
+export type { ProductBarcode } from '@core/modules/catalog/domain/barcode';
 export type {
   Depot,
   OrderLineRecord,
@@ -152,6 +171,10 @@ export interface TorreApi {
   removeSite(id: string): Promise<MasterDataView>;
   saveOrder(order: OrderRecord): Promise<MasterDataView>;
   removeOrder(id: string): Promise<MasterDataView>;
+  /** Planilla de productos: todo o nada (422 IMPORTACION_INVALIDA con el detalle). */
+  importProducts(products: Omit<Product, 'unitVolumeM3'>[]): Promise<ImportSummary>;
+  /** Planilla de pedidos con sus obras nuevas o actualizadas: todo o nada. */
+  importOrders(input: { sites: SiteInput[]; orders: OrderRecord[] }): Promise<OrderImportSummary>;
 
   products(): Promise<Product[]>;
   cubicaje(request: CubicajeRequest): Promise<CubicajeResponse>;

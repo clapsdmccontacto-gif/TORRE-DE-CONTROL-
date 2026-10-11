@@ -120,7 +120,7 @@ async function run<T>(operation: () => Promise<T>): Promise<T> {
     return await operation();
   } catch (error) {
     if (error instanceof DomainError) {
-      throw new ApiError(422, { code: error.code, message: error.message });
+      throw new ApiError(422, { code: error.code, message: error.message, details: error.details });
     }
     throw error;
   }
@@ -137,6 +137,8 @@ export const localApi: TorreApi = {
   removeSite: (id) => run(async () => (await ready()).data.removeSite(id)),
   saveOrder: (order) => run(async () => (await ready()).data.saveOrder(order)),
   removeOrder: (id) => run(async () => (await ready()).data.removeOrder(id)),
+  importProducts: (products) => run(async () => (await ready()).data.importProducts(products)),
+  importOrders: (input) => run(async () => (await ready()).data.importOrders(input)),
 
   products: async () =>
     (await ready()).data.products().map((p) => ({ ...p, unitVolumeM3: unitVolumeM3(p) })),

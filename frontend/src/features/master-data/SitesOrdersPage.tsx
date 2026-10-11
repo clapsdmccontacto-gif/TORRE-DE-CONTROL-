@@ -1,22 +1,36 @@
-import { ClipboardList, HardHat, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
+import {
+  ClipboardList,
+  HardHat,
+  LoaderCircle,
+  MapPinned,
+  Pencil,
+  Phone,
+  Plus,
+  Save,
+  Search,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { LocationPicker } from '@/components/map/LocationPicker';
 import { ProductLinesEditor } from '@/components/product-lines';
-import { StatusBanner } from '@/components/status';
+import { StatusBanner, StatusLabel } from '@/components/status';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input, NativeSelect } from '@/components/ui/input';
 import { api } from '@/lib/api';
 import { formatKg } from '@/lib/format';
+import { geocodeAll } from '@/lib/geocoding';
 import type { LatLng, MasterDataView, SiteInput, SkuQuantity } from '@/types/api';
+import { ImportOrdersCard } from './import/ImportOrdersCard';
 import { useMasterData } from './use-master-data';
 
 type Change = (operation: () => Promise<MasterDataView>) => Promise<boolean>;
 
 /** Obras (dónde se entrega) y pedidos (qué se entrega): entrada del optimizador de rutas. */
 export function SitesOrdersPage() {
-  const { data, error, busy, change } = useMasterData();
+  const { data, error, busy, change, replace } = useMasterData();
   return (
     <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
       {error && (
@@ -28,6 +42,9 @@ export function SitesOrdersPage() {
       )}
       {data && (
         <>
+          <div className="xl:col-span-2">
+            <ImportOrdersCard data={data} onImported={replace} />
+          </div>
           <SitesCard data={data} busy={busy} change={change} />
           <OrdersCard data={data} busy={busy} change={change} />
         </>
@@ -42,6 +59,9 @@ const NEW_SITE: SiteInput = {
   location: { lat: 0, lng: 0 },
   hasUnloadingEquipment: false,
   notifyEtaMinutes: 15,
+  address: null,
+  contactName: null,
+  contactPhone: null,
 };
 
 function SitesCard({
@@ -57,6 +77,11 @@ function SitesCard({
   const [location, setLocation] = useState<LatLng | null>(null);
   // Cambia al limpiar o editar: el selector de ubicación parte de cero (sin texto pegado).
   const [formKey, setFormKey] = useState(0);
+  const [search, setSearch] = useState<{ busy: boolean; message: string | null; ok: boolean }>({
+    busy: false,
+    message: null,
+    ok: true,
+  });
   const others = useMemo(
     () => [
       ...(data.depot ? [{ location: data.depot.location, label: data.depot.name }] : []),
@@ -71,6 +96,31 @@ function SitesCard({
     setDraft(NEW_SITE);
     setLocation(null);
     setFormKey((k) => k + 1);
+    setSearch({ busy: false, message: null, ok: true });
+  }
+
+  /** Ubica la obra por su dirección (TomTom); después se puede corregir en el mapa. */
+  async function locate() {
+    setSearch({ busy: true, message: null, ok: true });
+    const query = `${draft.address ?? ''}, ${draft.commune}, Chile`;
+    const result = (await geocodeAll([{ key: 'obra', query }], () => undefined)).get('obra');
+    if (result) {
+      setLocation(result.location);
+      setFormKey((k) => k + 1);
+      setSearch({
+        busy: false,
+        ok: result.precise,
+        message: result.precise
+          ? `Ubicada: ${result.label}. Revise el punto en el mapa.`
+          : `Sólo se encontró la calle (${result.label}): mueva el punto a la entrada de la obra.`,
+      });
+    } else {
+      setSearch({
+        busy: false,
+        ok: false,
+        message: 'No se encontró la dirección: marque la obra tocando el mapa.',
+      });
+    }
   }
 
   async function save() {
@@ -97,12 +147,21 @@ function SitesCard({
                 key={s.id}
                 className="flex items-center justify-between gap-3 rounded-lg border p-3"
               >
-                <span className="min-w-0">
-                  <span className="font-medium">{s.name}</span>{' '}
-                  <span className="text-muted-foreground">
-                    · {s.commune} · aviso {s.notifyEtaMinutes} min
-                    {s.hasUnloadingEquipment && ' · con grúa en obra'}
+                <span className="grid min-w-0 gap-0.5">
+                  <span>
+                    <span className="font-medium">{s.name}</span>{' '}
+                    <span className="text-muted-foreground">
+                      · {s.commune} · aviso {s.notifyEtaMinutes} min
+                      {s.hasUnloadingEquipment && ' · con grúa en obra'}
+                    </span>
                   </span>
+                  {s.address && <span className="text-muted-foreground">{s.address}</span>}
+                  {(s.contactName || s.contactPhone) && (
+                    <span className="flex items-center gap-1 text-muted-foreground">
+                      <Phone className="size-3.5 shrink-0" aria-hidden />
+                      {[s.contactName, s.contactPhone].filter(Boolean).join(' · ')}
+                    </span>
+                  )}
                 </span>
                 <span className="flex shrink-0 gap-1">
                   <Button
@@ -161,7 +220,54 @@ function SitesCard({
               onChange={(e) => setDraft({ ...draft, commune: e.target.value })}
             />
           </label>
+          <label className="grid min-w-0 gap-1.5 sm:col-span-2">
+            <span className="font-medium">Dirección (calle y número)</span>
+            <span className="flex min-w-0 gap-2">
+              <Input
+                id="site-address"
+                placeholder="Ej.: Av. Alemania 1234"
+                value={draft.address ?? ''}
+                onChange={(e) => setDraft({ ...draft, address: e.target.value || null })}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                disabled={search.busy || !draft.address?.trim() || draft.commune.trim().length < 2}
+                onClick={() => void locate()}
+              >
+                {search.busy ? <LoaderCircle className="animate-spin" /> : <Search />} Ubicar
+              </Button>
+            </span>
+          </label>
+          {search.message && (
+            <div className="sm:col-span-2">
+              <StatusLabel status={search.ok ? 'good' : 'warning'}>{search.message}</StatusLabel>
+            </div>
+          )}
+          <label className="grid min-w-0 gap-1.5">
+            <span className="font-medium">Contacto en obra (opcional)</span>
+            <Input
+              id="site-contact"
+              placeholder="Quién recibe"
+              value={draft.contactName ?? ''}
+              onChange={(e) => setDraft({ ...draft, contactName: e.target.value || null })}
+            />
+          </label>
+          <label className="grid min-w-0 gap-1.5">
+            <span className="font-medium">Teléfono del contacto (opcional)</span>
+            <Input
+              id="site-phone"
+              type="tel"
+              inputMode="tel"
+              placeholder="+56 9 1234 5678"
+              value={draft.contactPhone ?? ''}
+              onChange={(e) => setDraft({ ...draft, contactPhone: e.target.value || null })}
+            />
+          </label>
           <div className="sm:col-span-2">
+            <p className="mb-1.5 flex items-center gap-1 font-medium">
+              <MapPinned className="size-4" aria-hidden /> Punto de entrega en el mapa
+            </p>
             <LocationPicker
               key={formKey}
               id="site-location"
@@ -224,16 +330,26 @@ function OrdersCard({
   const [id, setId] = useState('');
   const [siteId, setSiteId] = useState('');
   const [lines, setLines] = useState<SkuQuantity[]>([]);
+  const [details, setDetails] = useState({ customerName: '', deliveryDate: '', notes: '' });
   const selectedSite = siteId || data.sites[0]?.id || '';
   const ready = data.sites.length > 0 && products.length > 0;
 
   function reset() {
     setId('');
     setLines([]);
+    setDetails({ customerName: '', deliveryDate: '', notes: '' });
   }
 
   async function save() {
-    if (await change(() => api.saveOrder({ id, siteId: selectedSite, lines }))) reset();
+    const order = {
+      id,
+      siteId: selectedSite,
+      lines,
+      customerName: details.customerName || null,
+      deliveryDate: details.deliveryDate || null,
+      notes: details.notes || null,
+    };
+    if (await change(() => api.saveOrder(order))) reset();
   }
 
   return (
@@ -260,6 +376,14 @@ function OrdersCard({
                   <span className="font-medium">
                     {o.id} <span className="font-normal text-muted-foreground">· {o.siteName}</span>
                   </span>
+                  {(o.customerName || o.deliveryDate) && (
+                    <span className="text-muted-foreground">
+                      {[o.customerName, o.deliveryDate && `Entrega ${formatDate(o.deliveryDate)}`]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </span>
+                  )}
+                  {o.notes && <span className="text-muted-foreground italic">{o.notes}</span>}
                   <span className="text-muted-foreground">
                     {o.lines
                       .map(
@@ -279,6 +403,11 @@ function OrdersCard({
                       setId(o.id);
                       setSiteId(o.siteId);
                       setLines(o.lines.map((l) => ({ ...l })));
+                      setDetails({
+                        customerName: o.customerName ?? '',
+                        deliveryDate: o.deliveryDate ?? '',
+                        notes: o.notes ?? '',
+                      });
                     }}
                   >
                     <Pencil />
@@ -348,6 +477,34 @@ function OrdersCard({
                 </NativeSelect>
               </label>
             </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="grid min-w-0 gap-1.5">
+                <span className="font-medium">Cliente (opcional)</span>
+                <Input
+                  id="order-customer"
+                  value={details.customerName}
+                  onChange={(e) => setDetails({ ...details, customerName: e.target.value })}
+                />
+              </label>
+              <label className="grid min-w-0 gap-1.5">
+                <span className="font-medium">Fecha de entrega (opcional)</span>
+                <Input
+                  id="order-date"
+                  type="date"
+                  value={details.deliveryDate}
+                  onChange={(e) => setDetails({ ...details, deliveryDate: e.target.value })}
+                />
+              </label>
+              <label className="grid min-w-0 gap-1.5 sm:col-span-2">
+                <span className="font-medium">Notas para la entrega (opcional)</span>
+                <Input
+                  id="order-notes"
+                  placeholder="Ej.: entrar por el portón de calle Colón"
+                  value={details.notes}
+                  onChange={(e) => setDetails({ ...details, notes: e.target.value })}
+                />
+              </label>
+            </div>
             <ProductLinesEditor
               products={products}
               lines={lines}
@@ -369,4 +526,10 @@ function OrdersCard({
       </CardContent>
     </Card>
   );
+}
+
+/** «2026-10-15» → «15-10-2026». */
+function formatDate(iso: string): string {
+  const [year, month, day] = iso.split('-');
+  return `${day}-${month}-${year}`;
 }

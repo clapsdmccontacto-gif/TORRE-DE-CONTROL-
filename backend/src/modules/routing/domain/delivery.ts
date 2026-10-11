@@ -15,6 +15,11 @@ export interface DeliverySite {
   hasUnloadingEquipment: boolean;
   /** Minutos de ETA a los que se avisa al capataz. */
   notifyEtaMinutes: number;
+  /** Calle y número (lo que ve el conductor). */
+  address?: string | null;
+  /** Quién recibe en la obra y su teléfono (botón Llamar del conductor). */
+  contactName?: string | null;
+  contactPhone?: string | null;
 }
 
 /** Pedido a entregar en una obra (nota de venta + líneas). */
@@ -22,6 +27,10 @@ export interface DeliveryOrder {
   id: string;
   site: DeliverySite;
   lines: ProductLine[];
+  customerName?: string | null;
+  /** Fecha de entrega comprometida (AAAA-MM-DD). */
+  deliveryDate?: string | null;
+  notes?: string | null;
 }
 
 /** Pedido listo para planificar rutas: carga calculada y vehículos que lo pueden llevar. */

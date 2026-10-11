@@ -42,5 +42,8 @@ export function useMasterData() {
     }
   }, []);
 
-  return { data, error, busy, change, clearError: () => setError(null) };
+  /** Muestra una vista ya guardada (p. ej. la que devuelve una importación). */
+  const replace = useCallback((view: MasterDataView) => setData(view), []);
+
+  return { data, error, busy, change, replace, clearError: () => setError(null) };
 }

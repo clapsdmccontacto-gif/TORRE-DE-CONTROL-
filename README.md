@@ -519,9 +519,38 @@ Los conductores no la necesitan: navegan con Waze o Google Maps.
    (tocando el mapa, con *Usar mi ubicación actual* o pegando un enlace de Google Maps). La
    misma pantalla muestra el enlace para los teléfonos de los conductores.
 2. **Productos** (`#productos`): SKU, nombre, clase de manejo, peso y medidas por unidad,
-   frágil y si requiere grúa. Los usan el validador de mezcla, el cubicaje y los pedidos.
-3. **Obras y pedidos** (`#obras`): obras con ubicación, comuna, aviso al capataz y si tienen
-   grúa; pedidos con nota de venta, obra y productos. *Optimizar rutas* los planifica.
+   frágil, si requiere grúa, **ubicación en bodega** (pasillo-rack-nivel, ordena el picking)
+   y **códigos de barra** (EAN/UPC del proveedor o etiqueta interna; una caja puede valer
+   varias unidades: «código de la caja × 40»). Los EAN/UPC se validan con su dígito
+   verificador, un UPC-A y el mismo EAN-13 con un 0 adelante son el mismo código, y un código
+   no puede ser de dos productos (`catalog/domain/barcode.ts`). Los usan el cubicaje, los
+   pedidos y el picking.
+3. **Obras y pedidos** (`#obras`): obras con ubicación, comuna, **dirección** (con botón
+   *Ubicar*, que la busca en TomTom), **contacto y teléfono** de quien recibe, aviso al
+   capataz y si tienen grúa; pedidos con nota de venta, obra, productos, **cliente, fecha de
+   entrega y notas**. *Optimizar rutas* los planifica.
+
+**Importar desde Excel** (en *Productos* y en *Obras y pedidos*): se elige un .xlsx o un .csv
+(también el CSV «separado por punto y coma» que guarda Excel en Chile, en UTF-8 o
+Windows-1252) y se ve una **vista previa con los errores por fila antes de guardar**.
+*Descargar plantilla* entrega el .xlsx con los encabezados y una hoja «Instrucciones».
+
+- Productos: una fila por producto; si el SKU existe, se actualiza. Acepta coma decimal,
+  «Sí/No», la clase por su nombre y varios códigos separados por «;» (`código*unidades` para
+  la caja). Si Excel guardó un UPC como número y le quitó el 0 inicial, se repone.
+- Pedidos: una fila por producto de cada pedido (N° pedido, cliente, obra, dirección, comuna,
+  contacto, teléfono, fecha de entrega, SKU, cantidad; latitud y longitud opcionales). Las
+  filas del mismo N° se juntan; si el pedido existe, se reemplaza. Las obras ya registradas
+  se reconocen por nombre y comuna (la planilla puede completar su dirección y contacto); las
+  nuevas se **ubican solas por su dirección** con TomTom Search desde el navegador
+  (`routing/infrastructure/tomtom-geocoder.ts`) y las que no se encuentran se marcan en el
+  mapa antes de importar. Un pedido con alguna fila con error no se importa a medias.
+
+La lectura de planillas es una función pura (`master-data/domain/spreadsheet.ts`,
+`import-products.ts`, `import-orders.ts`) que comparten la vista previa del navegador y el
+servidor. La importación se guarda **de una vez y todo o nada**
+(`POST /master-data/import/products` y `/import/orders`; si algo no cumple las reglas,
+`422 IMPORTACION_INVALIDA` con el detalle por registro).
 
 Validaciones en `master-data/domain/master-data.ts` (patente, medidas, pedidos contra obras y
 productos registrados; no deja borrar una obra o producto que usa un pedido). Se guardan como
@@ -542,6 +571,7 @@ navegador de ese equipo.
 | POST · DELETE | `/api/v1/master-data/products` · `/products/:sku` | Agrega o edita · quita un producto |
 | POST · DELETE | `/api/v1/master-data/sites` · `/sites/:id` | Agrega o edita · quita una obra |
 | POST · DELETE | `/api/v1/master-data/orders` · `/orders/:id` | Agrega o edita · quita un pedido |
+| POST | `/api/v1/master-data/import/products` · `/import/orders` | Importación desde planilla (todo o nada) |
 | GET | `/api/v1/catalog/products` | Catálogo con atributos logísticos |
 | GET | `/api/v1/picking/cart-types` | Capacidades por tipo de carro |
 | POST | `/api/v1/picking/cart-audit` | Revisión completa de un carro |
@@ -562,7 +592,8 @@ navegador de ese equipo.
 Errores: `400 SOLICITUD_INVALIDA` con detalle por campo (Zod) y `422` para reglas de negocio
 (`SKU_DESCONOCIDO`, `CANTIDAD_INVALIDA`, `CARGA_VACIA`, `AJUSTE_INVALIDO`, `PLAN_PUBLICADO`,
 `PATENTE_INVALIDA`, `SIN_BODEGA`, `SIN_VEHICULOS`, `OBRA_CON_PEDIDOS`, `PRODUCTO_EN_USO`,
-`SESION_DESCONOCIDA`, `PARADA_DESCONOCIDA`, `NUBE_YA_CONFIGURADA`), `401 CLAVE_INCORRECTA`,
+`SESION_DESCONOCIDA`, `PARADA_DESCONOCIDA`, `CODIGO_INVALIDO`, `CODIGO_DUPLICADO`,
+`IMPORTACION_INVALIDA`, `NUBE_YA_CONFIGURADA`), `401 CLAVE_INCORRECTA`,
 `403 NUBE_SIN_CLAVE` y
 `429 DEMASIADOS_INTENTOS`.
 

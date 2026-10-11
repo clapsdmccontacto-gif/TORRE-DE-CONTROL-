@@ -53,6 +53,73 @@ describe('validaciones de datos maestros', () => {
     );
   });
 
+  it('valida códigos de barra y ubicación en bodega del producto', () => {
+    const product = validateProduct({
+      ...DEMO_PRODUCTS[0],
+      barcodes: [
+        { code: ' 7802820005455 ', unitsPerScan: 1 },
+        { code: '17802820005452', unitsPerScan: 40 },
+      ],
+      binLocation: ' p3 - r2 - n1 ',
+    });
+    expect(product.barcodes).toEqual([
+      { code: '7802820005455', unitsPerScan: 1 },
+      { code: '17802820005452', unitsPerScan: 40 },
+    ]);
+    expect(product.binLocation).toBe('P3-R2-N1');
+    expect(validateProduct(DEMO_PRODUCTS[0])).toMatchObject({ barcodes: [], binLocation: null });
+    expect(() =>
+      validateProduct({
+        ...DEMO_PRODUCTS[0],
+        barcodes: [{ code: '7802820005456', unitsPerScan: 1 }],
+      }),
+    ).toThrow(expect.objectContaining({ code: 'CODIGO_INVALIDO' }));
+  });
+
+  it('valida dirección y contacto de la obra; fecha, cliente y notas del pedido', () => {
+    const full = validateSite({
+      ...site,
+      address: '  Av. Alemania   1234 ',
+      contactName: 'Juan Pérez',
+      contactPhone: '+56 9 1234 5678',
+    });
+    expect(full).toMatchObject({
+      address: 'Av. Alemania 1234',
+      contactName: 'Juan Pérez',
+      contactPhone: '+56 9 1234 5678',
+    });
+    expect(validateSite(site)).toMatchObject({
+      address: null,
+      contactName: null,
+      contactPhone: null,
+    });
+    expect(() => validateSite({ ...site, contactPhone: 'llamar' })).toThrow(
+      expect.objectContaining({ code: 'TELEFONO_INVALIDO' }),
+    );
+    const data: MasterDataSnapshot = {
+      ...EMPTY_MASTER_DATA,
+      products: [DEMO_PRODUCTS[0]],
+      sites: [validateSite(site)],
+    };
+    const lines = [{ sku: DEMO_PRODUCTS[0].sku, quantity: 1 }];
+    expect(
+      validateOrder(
+        {
+          id: 'NV-9',
+          siteId: 'OBRA-1',
+          lines,
+          customerName: ' Constructora Sur ',
+          deliveryDate: '2026-10-15',
+          notes: '',
+        },
+        data,
+      ),
+    ).toMatchObject({ customerName: 'Constructora Sur', deliveryDate: '2026-10-15', notes: null });
+    expect(() =>
+      validateOrder({ id: 'NV-9', siteId: 'OBRA-1', lines, deliveryDate: '2026-02-30' }, data),
+    ).toThrow(expect.objectContaining({ code: 'FECHA_INVALIDA' }));
+  });
+
   it('valida obras: nombre, comuna, ubicación y aviso', () => {
     expect(validateSite(site).name).toBe('Edificio Las Araucarias');
     expect(() => validateSite({ ...site, location: { lat: 120, lng: 0 } })).toThrow(
@@ -82,7 +149,14 @@ describe('validaciones de datos maestros', () => {
         },
         data,
       ),
-    ).toEqual({ id: 'NV-1', siteId: 'OBRA-1', lines: [{ sku, quantity: 5 }] });
+    ).toEqual({
+      id: 'NV-1',
+      siteId: 'OBRA-1',
+      lines: [{ sku, quantity: 5 }],
+      customerName: null,
+      deliveryDate: null,
+      notes: null,
+    });
     expect(() =>
       validateOrder({ id: 'NV-2', siteId: 'X', lines: [{ sku, quantity: 1 }] }, data),
     ).toThrow(expect.objectContaining({ code: 'OBRA_DESCONOCIDA' }));

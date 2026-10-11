@@ -1,4 +1,5 @@
 import { DomainError } from '../../../common/domain-error.js';
+import type { ProductBarcode } from './barcode.js';
 
 /**
  * Clase de manipulación: define con qué se puede mezclar un ítem en el carro
@@ -31,6 +32,10 @@ export interface Product {
   isFragile: boolean;
   /** Fuerza descarga mecánica aunque la unidad pese menos que el límite de manipulación manual. */
   requiresMechanicalUnload: boolean;
+  /** Códigos de barra (proveedor, caja): los escanea el picking. Sin códigos: `[]`. */
+  barcodes?: ProductBarcode[];
+  /** Ubicación en bodega (pasillo-rack-nivel, p. ej. «P3-R2-N1»): ordena el picking. */
+  binLocation?: string | null;
 }
 
 /** Producto + cantidad: unidad básica tanto de picking como de carga. */
