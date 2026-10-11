@@ -119,6 +119,27 @@ describe('TrackingHub', () => {
     expect(hub.snapshot().events[0].type).toBe('RUTA_ASIGNADA');
   });
 
+  it('un plan nuevo no le quita al camión lo que ya lleva a bordo', () => {
+    const { hub, planner, plan } = setup();
+    planner.onPublish((published) => hub.planPublished(published));
+    const route = plan.routes.find((r) => r.unitPlate === 'DEMO-03')!;
+    const session = hub.startSession({ driverName: 'Ana Soto', vehiclePlate: 'DEMO-03' });
+    // Plan nuevo sin esos pedidos (ya van en ruta, el optimizador no los ve).
+    const others = plan.routes.flatMap((r) => r.stops.map((s) => s.deliveryId));
+    const onBoard = new Set(route.stops.map((s) => s.deliveryId));
+    const rest = others.filter((id) => !onBoard.has(id));
+    if (rest.length > 0) {
+      const next = planner.optimize({ deliveryIds: rest, dieselPriceClp: 1_000 });
+      planner.publish(next.id);
+    }
+    expect(
+      hub
+        .snapshot()
+        .devices.find((d) => d.sessionId === session.id)!
+        .stops.map((s) => s.deliveryId),
+    ).toEqual(expect.arrayContaining([...onBoard]));
+  });
+
   it('guarda las rutas: tras un reinicio el teléfono sigue en la misma ruta y avance', async () => {
     const store = new MemoryRecordStore();
     const { hub, newHub, plan, at } = setup({ store });

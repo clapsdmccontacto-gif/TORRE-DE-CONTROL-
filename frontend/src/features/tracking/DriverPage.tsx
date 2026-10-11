@@ -1,11 +1,12 @@
 import { navigationLinks } from '@core/modules/routing/domain/road-route';
 import { targetStop } from '@core/modules/tracking/domain/tracking';
 import {
-  CircleCheck,
+  ClipboardCheck,
   ExternalLink,
   LoaderCircle,
   LocateFixed,
   Navigation,
+  Phone,
   Square,
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -15,14 +16,24 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input, NativeSelect } from '@/components/ui/input';
 import { api, apiMode, errorMessage } from '@/lib/api';
 import { ApiError } from '@/lib/api-error';
-import { STOP_STATE_LABEL, formatKg } from '@/lib/format';
+import {
+  discardDelivery,
+  flushOutbox,
+  onOutboxChange,
+  pendingDeliveries,
+  type PendingDelivery,
+} from '@/lib/delivery-outbox';
+import { OUTCOME_LABEL, OUTCOME_STATUS, STOP_STATE_LABEL, formatKg } from '@/lib/format';
 import type {
   DriverSession,
   FleetUnitView,
+  LatLng,
   LiveDevice,
   LiveStop,
   PositionFix,
 } from '@/types/api';
+import { DeliverySheet } from './DeliverySheet';
+import { DriverMap } from './DriverMap';
 import { useWakeLock, type WakeLockState } from './use-wake-lock';
 
 const STORAGE_KEY = 'torre-control.driver-session';
@@ -124,7 +135,11 @@ export function DriverPage() {
   const [pending, setPending] = useState(0);
   const [device, setDevice] = useState<LiveDevice | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const [completing, setCompleting] = useState<string | null>(null);
+  const [lastFix, setLastFix] = useState<PositionFix | null>(null);
+  const [outbox, setOutbox] = useState<PendingDelivery[]>([]);
+  const [delivering, setDelivering] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [depot, setDepot] = useState<{ name: string; location: LatLng } | null>(null);
   const queueRef = useRef<PositionFix[]>([]);
   const wakeLock = useWakeLock(session !== null);
 
@@ -204,7 +219,9 @@ export function DriverPage() {
     if (!session || gpsUnavailableReason()) return;
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
-        queueRef.current.push(toFix(position));
+        const fix = toFix(position);
+        setLastFix(fix);
+        queueRef.current.push(fix);
         setPending(queueRef.current.length);
         setGps({ kind: 'ok', accuracyM: position.coords.accuracy, at: position.timestamp });
       },
@@ -231,6 +248,35 @@ export function DriverPage() {
     return api.subscribeFleet((snapshot) =>
       setDevice(snapshot.devices.find((d) => d.sessionId === session.id) ?? null),
     );
+  }, [session]);
+
+  // Comprobantes guardados en el teléfono: se envían solos al volver la señal.
+  useEffect(() => {
+    const refresh = () => void pendingDeliveries().then(setOutbox, () => undefined);
+    refresh();
+    const unsubscribe = onOutboxChange(refresh);
+    const retry = () => void flushOutbox();
+    retry();
+    const timer = setInterval(retry, 15_000);
+    window.addEventListener('online', retry);
+    return () => {
+      unsubscribe();
+      clearInterval(timer);
+      window.removeEventListener('online', retry);
+    };
+  }, []);
+
+  // Bodega del plan publicado: el mapa dibuja la vuelta.
+  useEffect(() => {
+    if (!session) return;
+    let active = true;
+    api.activePlan().then(
+      (plan) => active && setDepot(plan?.depot ?? null),
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
   }, [session]);
 
   useEffect(() => {
@@ -264,23 +310,6 @@ export function DriverPage() {
     }
   }
 
-  /** El conductor registra la entrega de un pedido (la geocerca sólo sugiere la llegada). */
-  async function completeStop(stop: LiveStop) {
-    if (!session) return;
-    setError(null);
-    setCompleting(stop.deliveryId);
-    try {
-      await flush();
-      const updated = await api.completeStop(session.id, stop.deliveryId);
-      // Se muestra de inmediato; la flota en vivo trae después la carga y la ETA al día.
-      setDevice((current) => (current ? { ...current, stops: updated.stops } : current));
-    } catch (e) {
-      setError(`No se pudo registrar la entrega en ${stop.siteName}: ${errorMessage(e)}`);
-    } finally {
-      setCompleting(null);
-    }
-  }
-
   async function finish() {
     if (!session) return;
     await flush();
@@ -292,7 +321,10 @@ export function DriverPage() {
     stopRoute(null);
   }
 
-  const target = device ? targetStop(device.stops) : null;
+  // Lo guardado en el teléfono cuenta como entregado mientras llega al servidor.
+  const queued = new Map(outbox.map((p) => [p.submission.orderId, p]));
+  const target = device ? targetStop(device.stops.filter((s) => !queued.has(s.deliveryId))) : null;
+  const deliveringStop = device?.stops.find((s) => s.deliveryId === delivering) ?? null;
 
   return (
     <div className="mx-auto grid w-full max-w-lg grid-cols-1 gap-4">
@@ -400,92 +432,113 @@ export function DriverPage() {
             </CardContent>
           </Card>
 
-          {device && device.stops.length === 0 && (
-            <StatusBanner status="warning" title="Su camión no tiene pedidos asignados">
-              La ruta y el GPS ya están activos. Pida a la torre de control que publique el plan de
-              rutas («Optimizar rutas» → «Publicar a la flota»): los pedidos aparecen aquí solos, sin
-              reiniciar la ruta.
-            </StatusBanner>
-          )}
+          <OutboxStatus outbox={outbox} />
+          {notice && <StatusLabel status="good">{notice}</StatusLabel>}
 
-          {device && device.stops.length > 0 && !target && (
-            <StatusBanner status="good" title="Entregó todos los pedidos">
-              Al volver a la bodega toque «Terminar ruta».
-            </StatusBanner>
-          )}
+          {session && deliveringStop ? (
+            <DeliverySheet
+              stop={deliveringStop}
+              sessionId={session.id}
+              lastFix={lastFix}
+              onCancel={() => setDelivering(null)}
+              onDone={(outcome) => {
+                setDelivering(null);
+                setNotice(
+                  `${OUTCOME_LABEL[outcome]} en ${deliveringStop.siteName}: comprobante guardado.`,
+                );
+              }}
+            />
+          ) : (
+            <>
+              {device && device.stops.length === 0 && (
+                <StatusBanner status="warning" title="Su camión no tiene pedidos asignados">
+                  La ruta y el GPS ya están activos. Pida a la torre de control que publique el plan
+                  de rutas («Optimizar rutas» → «Publicar a la flota»): los pedidos aparecen aquí
+                  solos, sin reiniciar la ruta.
+                </StatusBanner>
+              )}
 
-          {device && target && (
-            <Card>
-              <CardHeader>
-                <CardDescription>
-                  {target.state === 'EN_OBRA' ? 'Está en la obra' : 'Próxima obra'}
-                </CardDescription>
-                <CardTitle className="text-xl">{target.siteName}</CardTitle>
-              </CardHeader>
-              <CardContent className="grid grid-cols-1 gap-3 text-sm">
-                {target.state === 'EN_OBRA' ? (
-                  <StatusLabel status="good">
-                    Llegó a la obra. Cuando termine de descargar, registre la entrega.
-                  </StatusLabel>
-                ) : (
-                  <p className="text-muted-foreground">
-                    {device.nextStop?.siteName === target.siteName &&
-                    device.nextStop.etaMin != null
-                      ? `Llegada estimada en ${device.nextStop.etaMin} min. Se avisa al capataz antes de llegar.`
-                      : 'Calculando la hora de llegada con el GPS…'}
-                  </p>
-                )}
-                <DeliverButton
-                  stop={target}
-                  busy={completing === target.deliveryId}
-                  primary={target.state === 'EN_OBRA'}
-                  onConfirm={() => void completeStop(target)}
-                />
-                <NavigateButtons stop={target} />
-              </CardContent>
-            </Card>
-          )}
+              {device && device.stops.length > 0 && !target && (
+                <StatusBanner status="good" title="Entregó todos los pedidos">
+                  Al volver a la bodega toque «Terminar ruta».
+                </StatusBanner>
+              )}
 
-          {device && device.stops.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Ruta y carga</CardTitle>
-                <CardDescription>A bordo: {formatKg(device.cargoWeightKg)}</CardDescription>
-              </CardHeader>
-              <CardContent className="grid grid-cols-1 gap-3 text-sm">
-                {device.stops.map((stop, i) => (
-                  <div key={stop.deliveryId} className="grid gap-2 rounded-lg border p-3">
-                    <p className="flex justify-between gap-2 font-medium">
-                      <span className="min-w-0">
-                        {i + 1}. {stop.siteName}
-                      </span>
-                      {stop.state === 'COMPLETADA' ? (
-                        <StatusLabel status="good">{STOP_STATE_LABEL[stop.state]}</StatusLabel>
-                      ) : (
-                        <span className="shrink-0 text-muted-foreground">
-                          {STOP_STATE_LABEL[stop.state]}
-                        </span>
-                      )}
-                    </p>
-                    <ul className="text-muted-foreground">
-                      {stop.cargo.map((line) => (
-                        <li key={line.sku}>
-                          {line.quantity} × {line.name}
-                        </li>
-                      ))}
-                    </ul>
-                    {stop.state !== 'COMPLETADA' && stop !== target && (
-                      <DeliverButton
-                        stop={stop}
-                        busy={completing === stop.deliveryId}
-                        primary={false}
-                        onConfirm={() => void completeStop(stop)}
-                      />
+              {device && target && (
+                <Card>
+                  <CardHeader>
+                    <CardDescription>
+                      {target.state === 'EN_OBRA' ? 'Está en la obra' : 'Próxima entrega'} ·{' '}
+                      {target.deliveryId}
+                    </CardDescription>
+                    <CardTitle className="text-xl">{target.siteName}</CardTitle>
+                    <StopAddress stop={target} />
+                  </CardHeader>
+                  <CardContent className="grid grid-cols-1 gap-3 text-sm">
+                    {target.state === 'EN_OBRA' ? (
+                      <StatusLabel status="good">
+                        Llegó a la obra. Cuando termine de descargar, registre la entrega.
+                      </StatusLabel>
+                    ) : (
+                      <p className="text-muted-foreground">
+                        {device.nextStop?.siteName === target.siteName &&
+                        device.nextStop.etaMin != null
+                          ? `Llegada estimada en ${device.nextStop.etaMin} min. Se avisa al capataz antes de llegar.`
+                          : 'Calculando la hora de llegada con el GPS…'}
+                      </p>
                     )}
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
+                    <Button
+                      className="h-12 text-base"
+                      variant={target.state === 'EN_OBRA' ? 'default' : 'outline'}
+                      onClick={() => {
+                        setNotice(null);
+                        setDelivering(target.deliveryId);
+                      }}
+                    >
+                      <ClipboardCheck /> Entregar (firma y foto)
+                    </Button>
+                    <ContactButton stop={target} />
+                    <NavigateButtons stop={target} />
+                  </CardContent>
+                </Card>
+              )}
+
+              {device && device.stops.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Mapa de la ruta</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <DriverMap device={device} depot={depot} />
+                  </CardContent>
+                </Card>
+              )}
+
+              {device && device.stops.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Mis pedidos</CardTitle>
+                    <CardDescription>
+                      En orden de entrega · a bordo: {formatKg(device.cargoWeightKg)}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid grid-cols-1 gap-3 text-sm">
+                    {device.stops.map((stop, i) => (
+                      <OrderCard
+                        key={stop.deliveryId}
+                        index={i}
+                        stop={stop}
+                        queued={queued.get(stop.deliveryId) ?? null}
+                        onDeliver={() => {
+                          setNotice(null);
+                          setDelivering(stop.deliveryId);
+                        }}
+                      />
+                    ))}
+                  </CardContent>
+                </Card>
+              )}
+            </>
           )}
 
           <Button variant="outline" className="h-12 text-base" onClick={finish}>
@@ -557,49 +610,113 @@ function WakeLockStatus({ state }: { state: WakeLockState }) {
   );
 }
 
-/** Registrar la entrega pide confirmar (evita marcarla con un toque accidental). */
-function DeliverButton({
-  stop,
-  busy,
-  primary,
-  onConfirm,
-}: {
-  stop: LiveStop;
-  busy: boolean;
-  primary: boolean;
-  onConfirm: () => void;
-}) {
-  const [asking, setAsking] = useState(false);
-  if (asking) {
-    return (
-      <div className="grid gap-2 rounded-md border p-3">
-        <p className="font-medium">¿Confirma que entregó el pedido en {stop.siteName}?</p>
-        <div className="grid grid-cols-2 gap-2">
-          <Button
-            className="h-11"
-            disabled={busy}
-            onClick={() => {
-              setAsking(false);
-              onConfirm();
-            }}
-          >
-            <CircleCheck /> Sí, entregado
-          </Button>
-          <Button variant="outline" className="h-11" onClick={() => setAsking(false)}>
-            Cancelar
-          </Button>
-        </div>
-      </div>
-    );
-  }
+function StopAddress({ stop }: { stop: LiveStop }) {
+  const details = stop.details;
+  if (!details?.address && !details?.commune) return null;
   return (
-    <Button
-      variant={primary ? 'default' : 'outline'}
-      className="h-11"
-      disabled={busy}
-      onClick={() => setAsking(true)}
-    >
-      {busy ? <LoaderCircle className="animate-spin" /> : <CircleCheck />} Registrar entrega
-    </Button>
+    <p className="text-sm text-muted-foreground">
+      {[details.address, details.commune].filter(Boolean).join(', ')}
+    </p>
+  );
+}
+
+/** Llamar a quien recibe en la obra (si la torre cargó su teléfono). */
+function ContactButton({ stop }: { stop: LiveStop }) {
+  const phone = stop.details?.contactPhone;
+  if (!phone) return null;
+  return (
+    <LinkButton href={`tel:${phone.replace(/[^\d+]/g, '')}`} variant="outline" className="h-11">
+      <Phone /> Llamar a {stop.details?.contactName ?? 'la obra'} ({phone})
+    </LinkButton>
+  );
+}
+
+function OrderCard({
+  index,
+  stop,
+  queued,
+  onDeliver,
+}: {
+  index: number;
+  stop: LiveStop;
+  queued: PendingDelivery | null;
+  onDeliver: () => void;
+}) {
+  const details = stop.details;
+  return (
+    <div className="grid gap-2 rounded-lg border p-3">
+      <p className="flex flex-wrap items-start justify-between gap-2 font-medium">
+        <span className="min-w-0">
+          {index + 1}. {stop.siteName}
+          <span className="block text-xs font-normal text-muted-foreground">
+            {stop.deliveryId}
+            {details?.customerName && ` · ${details.customerName}`}
+          </span>
+        </span>
+        {stop.state === 'COMPLETADA' && stop.outcome ? (
+          <StatusLabel status={OUTCOME_STATUS[stop.outcome]}>
+            {OUTCOME_LABEL[stop.outcome]}
+          </StatusLabel>
+        ) : queued ? (
+          <StatusLabel status={queued.error ? 'critical' : 'warning'}>
+            {queued.error ? 'Rechazado por el servidor' : 'Guardado · pendiente de enviar'}
+          </StatusLabel>
+        ) : (
+          <span className="shrink-0 text-muted-foreground">{STOP_STATE_LABEL[stop.state]}</span>
+        )}
+      </p>
+      <StopAddress stop={stop} />
+      {details?.notes && <p className="text-muted-foreground italic">{details.notes}</p>}
+      <ul className="text-muted-foreground">
+        {stop.cargo.map((line) => (
+          <li key={line.sku}>
+            {line.quantity} × {line.name}
+          </li>
+        ))}
+      </ul>
+      {stop.state !== 'COMPLETADA' && !queued && (
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Button variant="outline" className="h-11" onClick={onDeliver}>
+            <ClipboardCheck /> Entregar
+          </Button>
+          <ContactButton stop={stop} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Comprobantes que esperan señal o que el servidor rechazó. */
+function OutboxStatus({ outbox }: { outbox: PendingDelivery[] }) {
+  if (outbox.length === 0) return null;
+  const rejected = outbox.filter((p) => p.error);
+  const waiting = outbox.length - rejected.length;
+  return (
+    <div className="grid gap-2">
+      {waiting > 0 && (
+        <StatusBanner status="warning" title="Sin enviar todavía">
+          {waiting === 1
+            ? 'Un comprobante está guardado'
+            : `${waiting} comprobantes están guardados`}{' '}
+          en el teléfono: se envían solos cuando vuelva la señal. No borre los datos del navegador.
+        </StatusBanner>
+      )}
+      {rejected.map((p) => (
+        <StatusBanner
+          key={p.submission.id}
+          status="critical"
+          title={`Pedido ${p.submission.orderId}`}
+        >
+          El servidor no aceptó el comprobante: {p.error}{' '}
+          <button
+            type="button"
+            className="font-medium text-foreground underline"
+            onClick={() => void discardDelivery(p.submission.id)}
+          >
+            Descartar para registrarlo de nuevo
+          </button>
+        </StatusBanner>
+      ))}
+    </div>
   );
 }

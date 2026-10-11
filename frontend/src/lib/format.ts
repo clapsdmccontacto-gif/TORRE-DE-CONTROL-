@@ -1,4 +1,4 @@
-import type { HandlingClass, StopState } from '@/types/api';
+import type { DeliveryOutcome, HandlingClass, StopState } from '@/types/api';
 
 const number = (maxDecimals: number) =>
   new Intl.NumberFormat('es-CL', { maximumFractionDigits: maxDecimals });
@@ -58,3 +58,28 @@ export const STOP_STATE_LABEL: Record<StopState, string> = {
   EN_OBRA: 'En la obra',
   COMPLETADA: 'Entregado',
 };
+
+export const OUTCOME_LABEL: Record<DeliveryOutcome, string> = {
+  ENTREGADO: 'Entregado',
+  ENTREGA_PARCIAL: 'Entrega parcial',
+  RECHAZADO: 'Rechazado',
+};
+
+/** Estado (ícono + color) de cada resultado de entrega. */
+export const OUTCOME_STATUS: Record<DeliveryOutcome, 'good' | 'warning' | 'critical'> = {
+  ENTREGADO: 'good',
+  ENTREGA_PARCIAL: 'warning',
+  RECHAZADO: 'critical',
+};
+
+export { ORDER_STATUS_LABEL } from '@core/modules/fulfillment/domain/order-status';
+
+const dateTime = new Intl.DateTimeFormat('es-CL', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+/** «15-10-2026, 14:05». */
+export const formatDateTime = (iso: string) => dateTime.format(new Date(iso));

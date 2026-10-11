@@ -139,9 +139,11 @@ describe('Datos maestros (e2e)', () => {
       })
       .expect(200);
     expect(orders.body).toMatchObject({ created: 1, sitesCreated: 1 });
-    expect(orders.body.view.orders.find((o: { id: string }) => o.id === 'NV-IMP-1')).toMatchObject(
-      { siteName: 'Casa Pérez', customerName: 'Constructora Sur', deliveryDate: '2026-10-20' },
-    );
+    expect(orders.body.view.orders.find((o: { id: string }) => o.id === 'NV-IMP-1')).toMatchObject({
+      siteName: 'Casa Pérez',
+      customerName: 'Constructora Sur',
+      deliveryDate: '2026-10-20',
+    });
     const deliveries = await request(server).get('/api/v1/routing/deliveries').expect(200);
     expect(deliveries.body.map((d: { id: string }) => d.id)).toContain('NV-IMP-1');
   });

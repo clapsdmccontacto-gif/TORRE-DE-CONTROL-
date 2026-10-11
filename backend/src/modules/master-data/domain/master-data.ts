@@ -99,7 +99,11 @@ export function normalizeIsoDate(value: string | null | undefined, field: string
 
 /** Ubicación en bodega: «p3 - r2 - n1» → «P3-R2-N1». */
 function binLocation(value: string | null | undefined): string | null {
-  const clean = (value ?? '').trim().toUpperCase().replace(/\s*-\s*/g, '-').replace(/\s+/g, ' ');
+  const clean = (value ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s*-\s*/g, '-')
+    .replace(/\s+/g, ' ');
   if (clean === '') return null;
   if (!/^[A-Z0-9 .\-/]{1,20}$/.test(clean)) {
     throw invalid('DATO_INVALIDO', 'Ubicación en bodega: hasta 20 letras, números o guiones.');

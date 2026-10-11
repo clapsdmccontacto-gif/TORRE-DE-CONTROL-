@@ -1,5 +1,6 @@
 import { DomainError } from '../../../common/domain-error.js';
 import { distanceMeters, isValidLatLng, type LatLng } from '../../../common/geo.js';
+import type { DeliveryOutcome } from '../../epod/domain/delivery-proof.js';
 
 /** Lectura GPS enviada por el teléfono del conductor. */
 export interface PositionFix {
@@ -131,6 +132,8 @@ export interface TrackedStop {
   notifyEtaMinutes: number;
   state: StopState;
   proximityNotified: boolean;
+  /** Resultado registrado por el conductor (sólo en paradas COMPLETADA). */
+  outcome?: DeliveryOutcome | null;
 }
 
 export type TrackingEventType =
@@ -199,13 +202,16 @@ export function progressStops(
 export function completeStop(
   stops: readonly TrackedStop[],
   deliveryId: string,
+  outcome: DeliveryOutcome = 'ENTREGADO',
 ): { stops: TrackedStop[]; event: StopEvent | null } {
   const index = stops.findIndex((s) => s.deliveryId === deliveryId);
   if (index === -1) {
     throw new DomainError('PARADA_DESCONOCIDA', `La ruta no tiene el pedido ${deliveryId}.`);
   }
   if (stops[index].state === 'COMPLETADA') return { stops: [...stops], event: null };
-  const next = stops.map((s, i) => (i === index ? { ...s, state: 'COMPLETADA' as const } : s));
+  const next = stops.map((s, i) =>
+    i === index ? { ...s, state: 'COMPLETADA' as const, outcome } : s,
+  );
   return { stops: next, event: stopEvent('ENTREGA_REGISTRADA', next[index], null) };
 }
 

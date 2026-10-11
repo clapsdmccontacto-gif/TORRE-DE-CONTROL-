@@ -11,7 +11,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { LocationPicker } from '@/components/map/LocationPicker';
 import { ProductLinesEditor } from '@/components/product-lines';
 import { StatusBanner, StatusLabel } from '@/components/status';
@@ -20,9 +20,16 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input, NativeSelect } from '@/components/ui/input';
 import { api } from '@/lib/api';
-import { formatKg } from '@/lib/format';
+import { ORDER_STATUS_LABEL, OUTCOME_STATUS, formatKg } from '@/lib/format';
 import { geocodeAll } from '@/lib/geocoding';
-import type { LatLng, MasterDataView, SiteInput, SkuQuantity } from '@/types/api';
+import type {
+  DeliveryOutcome,
+  LatLng,
+  MasterDataView,
+  OrderTrack,
+  SiteInput,
+  SkuQuantity,
+} from '@/types/api';
 import { ImportOrdersCard } from './import/ImportOrdersCard';
 import { useMasterData } from './use-master-data';
 
@@ -327,6 +334,7 @@ function OrdersCard({
   change: Change;
 }) {
   const products = data.products;
+  const tracks = useOrderTracks(data);
   const [id, setId] = useState('');
   const [siteId, setSiteId] = useState('');
   const [lines, setLines] = useState<SkuQuantity[]>([]);
@@ -356,10 +364,10 @@ function OrdersCard({
     <Card className="content-start">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <ClipboardList className="size-5" aria-hidden /> Pedidos por despachar
+          <ClipboardList className="size-5" aria-hidden /> Pedidos
         </CardTitle>
         <CardDescription>
-          Nota de venta, obra y productos. Se planifican en «Optimizar rutas».
+          Nota de venta, obra y productos. Los pendientes se planifican en «Optimizar rutas».
         </CardDescription>
       </CardHeader>
       <CardContent className="grid grid-cols-1 gap-4 text-sm">
@@ -392,7 +400,10 @@ function OrdersCard({
                       )
                       .join(' · ')}
                   </span>
-                  <Badge variant="outline">{formatKg(o.weightKg)}</Badge>
+                  <span className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">{formatKg(o.weightKg)}</Badge>
+                    <OrderStatusLabel track={tracks.get(o.id) ?? null} />
+                  </span>
                 </span>
                 <span className="flex shrink-0 gap-1">
                   <Button
@@ -532,4 +543,45 @@ function OrdersCard({
 function formatDate(iso: string): string {
   const [year, month, day] = iso.split('-');
   return `${day}-${month}-${year}`;
+}
+
+/** Estado de cada pedido (en ruta, entregado…); se refresca junto con los datos. */
+function useOrderTracks(data: MasterDataView): Map<string, OrderTrack> {
+  const [tracks, setTracks] = useState<Map<string, OrderTrack>>(new Map());
+  useEffect(() => {
+    let active = true;
+    api.orderTracks().then(
+      (list) => active && setTracks(new Map(list.map((t) => [t.orderId, t]))),
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, [data]);
+  return tracks;
+}
+
+function OrderStatusLabel({ track }: { track: OrderTrack | null }) {
+  const status = track?.status ?? 'PENDIENTE';
+  if (status in OUTCOME_STATUS) {
+    return (
+      <span className="flex items-center gap-2">
+        <StatusLabel status={OUTCOME_STATUS[status as DeliveryOutcome]}>
+          {ORDER_STATUS_LABEL[status]}
+        </StatusLabel>
+        <a
+          className="text-xs font-medium underline"
+          href={`#entregas?pedido=${encodeURIComponent(track!.orderId)}`}
+        >
+          Ver comprobante
+        </a>
+      </span>
+    );
+  }
+  return (
+    <Badge variant="secondary">
+      {ORDER_STATUS_LABEL[status]}
+      {track?.vehiclePlate && status !== 'PENDIENTE' ? ` · ${track.vehiclePlate}` : ''}
+    </Badge>
+  );
 }

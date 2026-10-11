@@ -402,10 +402,13 @@ llamar al cubicaje.
   y teléfono (opcional, para que la torre lo llame), elige su camión de la lista de *Flota y
   bodega* y toca *Activar GPS e iniciar ruta*; el teléfono recuerda sus datos. Envía su
   posición cada 5 s; si pierde señal acumula las lecturas y las manda al recuperarla. Si el
-  servidor se reinicia, la ruta sigue igual (queda guardada, ver abajo). Ve su próxima obra
-  con la hora estimada de llegada, sus paradas, lo que lleva y botones para navegar con Waze.
-  Si el camión todavía no tiene pedidos, la app le dice que pida publicar el plan; cuando la
-  torre lo publica, las paradas le llegan solas, sin reiniciar la ruta.
+  servidor se reinicia, la ruta sigue igual (queda guardada, ver abajo). Ve su **próxima
+  entrega** (obra, dirección, hora estimada, botón *Llamar* a quien recibe y navegación con
+  Waze o Google Maps), un **mapa** con su posición, las paradas numeradas y lo que falta por
+  calles, y **Mis pedidos** en orden de entrega (cliente, dirección, contacto, notas,
+  productos y estado). Si el camión todavía no tiene pedidos, la app le dice que pida
+  publicar el plan; cuando la torre lo publica, las paradas le llegan solas, sin reiniciar
+  la ruta. Al iniciar la ruta, sus pedidos pasan a *EN_RUTA*.
 - **Enlace del conductor** (*Flota y bodega*): trae la clave y deja al teléfono **sólo en el
   modo conductor**, sin el menú de oficina, aunque se recargue o cambie la dirección
   (`app=conductor`, guardado en el teléfono; abajo hay un botón para salir).
@@ -417,9 +420,9 @@ llamar al cubicaje.
 - **Paradas y avisos**: con la ETA (línea recta × 1,3 a la velocidad actual o 40 km/h) se
   registra *AVISO_PROXIMIDAD* cuando falta lo configurado para la obra (15 min, una sola vez)
   y *LLEGADA_OBRA* al entrar a 150 m de cualquier obra pendiente: la app sólo **sugiere**
-  «Llegó a la obra». La entrega **no se marca sola**: el conductor toca *Registrar entrega* y
-  confirma (*ENTREGA_REGISTRADA*). Si sale (más de 250 m) sin registrarla, *SALIDA_OBRA* avisa
-  a la torre y la obra vuelve a pendiente.
+  «Llegó a la obra». La entrega **no se marca sola**: el conductor la registra con su
+  comprobante (sección 5.7, *ENTREGA_REGISTRADA*). Si sale (más de 250 m) sin registrarla,
+  *SALIDA_OBRA* avisa a la torre y la obra vuelve a pendiente.
 - **Mapa en vivo** (`#mapa`): todos los vehículos en ruta con su estado (en movimiento,
   detenido, sin señal), trayecto recorrido, paradas pendientes, carga a bordo y feed de
   eventos. Se actualiza por Server-Sent Events, sin recargar. Al elegir un vehículo, *lo
@@ -558,6 +561,46 @@ un documento JSON en PostgreSQL (`app_state`, migración 004) cuando hay `DATABA
 ella, en memoria. En la versión sin servidor (GitHub Pages, archivo HTML) quedan en el
 navegador de ese equipo.
 
+### 5.7 Entregas con comprobante (e-POD) y estado de cada pedido
+
+**Estados del pedido** (`fulfillment/domain/order-status.ts`, con tests): `PENDIENTE →
+EN_PICKING → PICKEADO | PICKEADO_PARCIAL → CARGADO → EN_RUTA → ENTREGADO | ENTREGA_PARCIAL |
+RECHAZADO`. Las transiciones válidas están en una máquina de estados (se puede liberar un
+picking o bajar un pedido del camión; si la bodega no escanea, el pedido puede salir a ruta
+directo; los estados de entrega son finales). `OrderTracker` guarda el estado y el historial
+de cada pedido (quién, cuándo, qué camión) en `ops_records`. Los pedidos en ruta o
+entregados ya no aparecen en *Optimizar rutas*; *Obras y pedidos* muestra el estado de cada
+uno.
+
+**Entregar** (modo conductor): en cada pedido, *Entregar (firma y foto)* abre el comprobante:
+
+- Cantidades entregadas de cada producto (todo, por defecto). Con algo menos es **entrega
+  parcial**; con nada, **rechazo**: en ambos casos se elige el motivo.
+- **Quién recibe**: nombre y RUT (validado con su dígito verificador, `epod/domain/rut.ts`)
+  y **firma con el dedo** en la pantalla. En un rechazo no se piden.
+- **Foto del domicilio o lugar de entrega** con la cámara (y una segunda opcional, p. ej. la
+  carga descargada), comprimida en el teléfono (JPEG ~1280 px, menos de ~300 KB).
+- Solos: la hora, la posición GPS y la **distancia a la obra**; a más de 300 m el
+  comprobante queda marcado *para revisar*.
+- **Sin señal** el comprobante queda guardado en el teléfono (IndexedDB) con el aviso «sin
+  enviar todavía» y se envía solo al volver la conexión. Lleva un id generado en el teléfono:
+  reenviarlo no lo duplica.
+
+Las reglas (`epod/domain/delivery-proof.ts`) son las mismas en el teléfono (avisa antes de
+enviar) y en el servidor (`DeliveryRegistry`), que valida contra el pedido y la ruta del
+conductor, guarda el comprobante y deja el pedido en *ENTREGADO*, *ENTREGA_PARCIAL* o
+*RECHAZADO*. Firma y fotos van en `delivery_images` (`bytea`, máximo 1 MB cada una; migración
+006), nunca en `app_state`, y se sirven por un endpoint protegido con la clave.
+
+**Entregas** (`#entregas`, torre de control): comprobantes con filtros por fecha, camión y
+resultado, totales (entregados, parciales, rechazados, para revisar) y, en cada uno, quién
+recibió, firma, fotos, cantidades, motivo y mapa del punto de entrega frente a la obra, con
+*Imprimir o guardar PDF*. Desde el mapa en vivo y desde *Obras y pedidos*, *Ver comprobante*
+abre el de ese pedido. En modo local los comprobantes quedan en el navegador.
+
+Espacio: cada entrega ocupa unos 100–400 KB (fotos y firma). La base gratuita de Render
+(1 GB) alcanza para unos miles; para operar todo el año conviene un plan pagado o Neon.
+
 ### Otros endpoints
 
 | Método | Ruta | Uso |
@@ -585,7 +628,10 @@ navegador de ese equipo.
 | POST | `/api/v1/tracking/sessions` | Inicia la ruta de un conductor |
 | POST | `/api/v1/tracking/sessions/:id/positions` | Lote de lecturas GPS (hasta 500) |
 | POST | `/api/v1/tracking/sessions/:id/end` | Termina la ruta |
-| POST | `/api/v1/tracking/sessions/:id/stops/:deliveryId/complete` | El conductor registra la entrega del pedido |
+| POST | `/api/v1/deliveries` | Comprobante de entrega (firma, fotos, quién recibe; idempotente por `id`) |
+| GET | `/api/v1/deliveries` · `/deliveries/:id` | Comprobantes (filtros `from`, `to`, `plate`, `outcome`, `order`) · uno |
+| GET | `/api/v1/deliveries/:id/images/:imageId` | Firma o foto (`?key=` para las etiquetas `<img>`) |
+| GET | `/api/v1/orders/tracks` | Estado e historial de los pedidos |
 | GET | `/api/v1/tracking/sessions/:id/track` | Trayecto recorrido y resumen |
 | GET | `/api/v1/tracking/live` · `/api/v1/tracking/stream` | Flota en vivo (foto · flujo SSE) |
 
@@ -593,6 +639,8 @@ Errores: `400 SOLICITUD_INVALIDA` con detalle por campo (Zod) y `422` para regla
 (`SKU_DESCONOCIDO`, `CANTIDAD_INVALIDA`, `CARGA_VACIA`, `AJUSTE_INVALIDO`, `PLAN_PUBLICADO`,
 `PATENTE_INVALIDA`, `SIN_BODEGA`, `SIN_VEHICULOS`, `OBRA_CON_PEDIDOS`, `PRODUCTO_EN_USO`,
 `SESION_DESCONOCIDA`, `PARADA_DESCONOCIDA`, `CODIGO_INVALIDO`, `CODIGO_DUPLICADO`,
+`COMPROBANTE_INVALIDO`, `RUTA_DESCONOCIDA`, `PEDIDO_FUERA_DE_RUTA`, `PEDIDO_YA_ENTREGADO`,
+`TRANSICION_INVALIDA`,
 `IMPORTACION_INVALIDA`, `NUBE_YA_CONFIGURADA`), `401 CLAVE_INCORRECTA`,
 `403 NUBE_SIN_CLAVE` y
 `429 DEMASIADOS_INTENTOS`.

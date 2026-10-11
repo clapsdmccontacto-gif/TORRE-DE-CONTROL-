@@ -1,4 +1,5 @@
 import {
+  ClipboardCheck,
   HardHat,
   Package,
   Warehouse,
@@ -16,6 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { CubicajePage } from '@/features/load-planning/CubicajePage';
 import { FleetPage } from '@/features/master-data/FleetPage';
 import { ProductsPage } from '@/features/master-data/ProductsPage';
+import { DeliveriesPage } from '@/features/epod/DeliveriesPage';
 import { SitesOrdersPage } from '@/features/master-data/SitesOrdersPage';
 import { RoutePlannerPage } from '@/features/routing/RoutePlannerPage';
 import { DriverPage } from '@/features/tracking/DriverPage';
@@ -77,6 +79,13 @@ const NAV: { group: string; items: NavItem[] }[] = [
         icon: MapIcon,
         route: 'mapa',
         description: 'Vehículos en ruta, su trayecto y lo que llevan, en tiempo real.',
+      },
+      {
+        label: 'Entregas',
+        icon: ClipboardCheck,
+        route: 'entregas',
+        description:
+          'Comprobantes de cada pedido: quién recibió, firma, foto, hora y punto de entrega.',
       },
       {
         label: 'Modo conductor',
@@ -247,6 +256,7 @@ export default function App() {
           {current.route === 'obras' && <SitesOrdersPage />}
           {current.route === 'rutas' && <RoutePlannerPage />}
           {current.route === 'mapa' && <LiveMapPage />}
+          {current.route === 'entregas' && <DeliveriesPage />}
           {current.route === 'cubicaje' && catalog && catalog.products.length > 0 && (
             <CubicajePage products={catalog.products} />
           )}

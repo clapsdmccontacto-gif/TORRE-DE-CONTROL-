@@ -10,9 +10,20 @@ import { DEFAULT_FLEET } from '@core/modules/load-planning/infrastructure/defaul
 import { MasterData } from '@core/modules/master-data/application/master-data';
 import type { StateStore } from '@core/modules/master-data/application/state-store.port';
 import { planLoad } from '@core/modules/load-planning/domain/cubicaje';
+import { DeliveryRegistry } from '@core/modules/epod/application/delivery-registry';
+import {
+  byNewest,
+  matchesFilter,
+  type ProofStore,
+  type StoredImage,
+} from '@core/modules/epod/application/proof-store.port';
+import { proofOrderOf, type DeliveryProof } from '@core/modules/epod/domain/delivery-proof';
+import { OrderTracker } from '@core/modules/fulfillment/application/order-tracker';
+import { isPlannable } from '@core/modules/fulfillment/domain/order-status';
 import { RoutePlanner } from '@core/modules/routing/application/route-planner';
-import { TrackingHub } from '@core/modules/tracking/application/tracking-hub';
+import { TrackingHub, stopDetailsOf } from '@core/modules/tracking/application/tracking-hub';
 import { ApiError } from '@/lib/api-error';
+import { idbAll, idbGet, idbPut } from '@/lib/idb';
 import type { TorreApi } from '@/types/api';
 
 export const LOCAL_DATA_KEY = 'torre-control.master-data';
@@ -72,14 +83,38 @@ const localRecords: RecordStore = {
   },
 };
 
-let localEngine: { data: MasterData; planner: RoutePlanner; hub: TrackingHub } | null = null;
+/** Comprobantes y sus fotos en el navegador (IndexedDB: localStorage no alcanza). */
+const localProofs: ProofStore = {
+  save: async (proof, images) => {
+    for (const image of images) await idbPut('proof-images', image.id, image);
+    await idbPut('proofs', proof.id, proof);
+  },
+  find: async (id) => (await idbGet<DeliveryProof>('proofs', id)) ?? null,
+  list: async (filter) =>
+    (await idbAll<DeliveryProof>('proofs')).filter((p) => matchesFilter(p, filter)).sort(byNewest),
+  image: async (proofId, imageId) => {
+    const image = await idbGet<StoredImage>('proof-images', imageId);
+    return image && image.proofId === proofId ? image : null;
+  },
+};
 
-function engine() {
+interface LocalEngine {
+  data: MasterData;
+  planner: RoutePlanner;
+  hub: TrackingHub;
+  tracker: OrderTracker;
+  registry: DeliveryRegistry;
+}
+
+let localEngine: LocalEngine | null = null;
+
+function engine(): LocalEngine {
   if (localEngine) return localEngine;
   const data = new MasterData({ store: localStore, vehicleTypes: DEFAULT_FLEET, maxPayloadKg });
+  const tracker = new OrderTracker({ store: localRecords });
   const planner = new RoutePlanner({
     depot: () => data.depot(),
-    orders: () => data.orders(),
+    orders: () => data.orders().filter((o) => isPlannable(tracker.status(o.id))),
     fleet: DEFAULT_FLEET,
     units: () => data.units(),
     store: localRecords,
@@ -88,16 +123,48 @@ function engine() {
     units: () => planner.units(),
     activePlan: () => planner.activePlan(),
     store: localRecords,
+    details: (id) => {
+      const order = data.orders().find((o) => o.id === id);
+      return order ? stopDetailsOf(order) : null;
+    },
+    onRouteStarted: (session) => {
+      for (const stop of session.stops) {
+        if (stop.state === 'COMPLETADA') continue;
+        tracker.tryTransition({
+          orderId: stop.deliveryId,
+          to: 'EN_RUTA',
+          actor: session.driverName,
+          vehiclePlate: session.vehiclePlate,
+        });
+      }
+    },
   });
   planner.onPublish((plan) => hub.planPublished(plan));
-  localEngine = { data, planner, hub };
+  const registry = new DeliveryRegistry({
+    store: localProofs,
+    order: (id) => {
+      const order = data.orders().find((o) => o.id === id);
+      return order ? proofOrderOf(order) : null;
+    },
+    route: (sessionId) => hub.route(sessionId),
+    tracker,
+    onDelivered: (proof) => {
+      hub.completeStop(proof.sessionId, proof.orderId, proof.outcome);
+    },
+  });
+  localEngine = { data, planner, hub, tracker, registry };
   return localEngine;
 }
 
-/** Motor con los datos, planes y rutas guardados ya cargados. */
+/** Motor con los datos, planes, rutas y pedidos guardados ya cargados. */
 async function ready() {
   const current = engine();
-  await Promise.all([current.data.ready, current.planner.ready, current.hub.ready]);
+  await Promise.all([
+    current.data.ready,
+    current.planner.ready,
+    current.hub.ready,
+    current.tracker.ready,
+  ]);
   return current;
 }
 
@@ -162,8 +229,23 @@ export const localApi: TorreApi = {
   sendPositions: (sessionId, fixes) =>
     run(async () => (await ready()).hub.ingest(sessionId, fixes)),
   endDriverSession: (sessionId) => run(async () => (await ready()).hub.endSession(sessionId)),
-  completeStop: (sessionId, deliveryId) =>
-    run(async () => (await ready()).hub.completeStop(sessionId, deliveryId)),
+  submitDelivery: (submission) => run(async () => (await ready()).registry.register(submission)),
+  deliveryProofs: (filter = {}) =>
+    run(async () =>
+      (await ready()).registry.list({
+        from: filter.from,
+        to: filter.to,
+        vehiclePlate: filter.plate,
+        outcome: filter.outcome,
+        orderId: filter.order,
+      }),
+    ),
+  deliveryImage: (proofId, imageId) =>
+    run(async () => {
+      const image = await (await ready()).registry.image(proofId, imageId);
+      return `data:${image.mime};base64,${image.base64}`;
+    }),
+  orderTracks: async () => (await ready()).tracker.all(),
   deviceTrack: (sessionId) => run(async () => (await ready()).hub.track(sessionId)),
   liveFleet: async () => (await ready()).hub.snapshot(),
   subscribeFleet: (onSnapshot) => {

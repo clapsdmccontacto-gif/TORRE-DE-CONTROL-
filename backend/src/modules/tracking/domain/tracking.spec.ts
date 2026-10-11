@@ -154,9 +154,7 @@ describe('progressStops', () => {
   it('detecta la llegada a cualquier obra pendiente, aunque no sea la siguiente', () => {
     const progress = progressStops(stops, { lat: -37.6004, lng: -72.3 }, 3);
     expect(progress.stops.map((s) => s.state)).toEqual(['PENDIENTE', 'EN_OBRA']);
-    expect(progress.events.map((e) => [e.type, e.deliveryId])).toEqual([
-      ['LLEGADA_OBRA', 'NV-2'],
-    ]);
+    expect(progress.events.map((e) => [e.type, e.deliveryId])).toEqual([['LLEGADA_OBRA', 'NV-2']]);
     expect(progress.nextStopEtaMin).toBe(0);
   });
 });

@@ -17,6 +17,12 @@ import type {
 } from '@core/modules/master-data/domain/master-data';
 import type { PositionFix } from '@core/modules/tracking/domain/tracking';
 import type {
+  DeliveryOutcome,
+  DeliveryProof,
+  DeliverySubmission,
+} from '@core/modules/epod/domain/delivery-proof';
+import type { OrderTrack } from '@core/modules/fulfillment/domain/order-status';
+import type {
   DriverSession,
   FleetSnapshot,
   IngestResult,
@@ -127,8 +133,24 @@ export type {
   IngestResult,
   LiveDevice,
   LiveStop,
+  StopDetails,
   TrackingEvent,
 } from '@core/modules/tracking/application/tracking-hub';
+export type {
+  DeliveryOutcome,
+  DeliveryProof,
+  DeliverySubmission,
+} from '@core/modules/epod/domain/delivery-proof';
+export type { OrderStatus, OrderTrack } from '@core/modules/fulfillment/domain/order-status';
+
+export interface DeliveryProofFilter {
+  /** Desde / hasta (ISO 8601). */
+  from?: string;
+  to?: string;
+  plate?: string;
+  outcome?: DeliveryOutcome;
+  order?: string;
+}
 
 export type {
   ImportError,
@@ -198,8 +220,13 @@ export interface TorreApi {
   }): Promise<DriverSession>;
   sendPositions(sessionId: string, fixes: PositionFix[]): Promise<IngestResult>;
   endDriverSession(sessionId: string): Promise<DriverSession>;
-  /** El conductor registró la entrega de un pedido de su ruta. */
-  completeStop(sessionId: string, deliveryId: string): Promise<DriverSession>;
+  /** Comprobante de entrega (firma, foto, quién recibe). Idempotente por `id`. */
+  submitDelivery(submission: DeliverySubmission): Promise<DeliveryProof>;
+  deliveryProofs(filter?: DeliveryProofFilter): Promise<DeliveryProof[]>;
+  /** Dirección para mostrar una firma o foto (en modo local, la imagen misma). */
+  deliveryImage(proofId: string, imageId: string): Promise<string>;
+  /** Estado e historial de los pedidos que ya se movieron (los demás, PENDIENTE). */
+  orderTracks(): Promise<OrderTrack[]>;
   deviceTrack(sessionId: string): Promise<TrackResponse>;
   liveFleet(): Promise<FleetSnapshot>;
   /** Fotos de la flota en vivo; devuelve la función para dejar de escuchar. */

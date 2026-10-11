@@ -34,5 +34,7 @@ export class CloudModule {}
 
 function isEmpty(data: MasterData): boolean {
   const s = data.snapshot();
-  return !s.depot && !s.vehicles.length && !s.products.length && !s.sites.length && !s.orders.length;
+  return (
+    !s.depot && !s.vehicles.length && !s.products.length && !s.sites.length && !s.orders.length
+  );
 }

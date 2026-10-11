@@ -49,15 +49,6 @@ export class TrackingController {
     return session;
   }
 
-  /** El conductor registró la entrega del pedido en la obra. */
-  @Post('sessions/:id/stops/:deliveryId/complete')
-  @HttpCode(200)
-  async completeStop(@Param('id') id: string, @Param('deliveryId') deliveryId: string) {
-    const session = this.hub.completeStop(id, deliveryId);
-    await this.hub.flush();
-    return session;
-  }
-
   @Get('sessions/:id/track')
   track(@Param('id') id: string) {
     return this.hub.track(id);

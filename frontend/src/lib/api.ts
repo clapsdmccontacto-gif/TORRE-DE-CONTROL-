@@ -79,11 +79,19 @@ function httpApi(baseUrl: string): TorreApi {
       post(`/tracking/sessions/${encodeURIComponent(sessionId)}/positions`, { fixes }),
     endDriverSession: (sessionId) =>
       post(`/tracking/sessions/${encodeURIComponent(sessionId)}/end`, {}),
-    completeStop: (sessionId, deliveryId) =>
-      post(
-        `/tracking/sessions/${encodeURIComponent(sessionId)}/stops/${encodeURIComponent(deliveryId)}/complete`,
-        {},
-      ),
+    submitDelivery: (submission) => post('/deliveries', submission),
+    deliveryProofs: (filter = {}) => {
+      const query = new URLSearchParams(
+        Object.entries(filter).filter((e): e is [string, string] => Boolean(e[1])),
+      ).toString();
+      return request(`/deliveries${query ? `?${query}` : ''}`);
+    },
+    deliveryImage: async (proofId, imageId) => {
+      // <img> no envía cabeceras: la clave va en la dirección.
+      const key = readCloudKey();
+      return `${baseUrl}/deliveries/${id(proofId)}/images/${id(imageId)}${key ? `?key=${encodeURIComponent(key)}` : ''}`;
+    },
+    orderTracks: () => request('/orders/tracks'),
     deviceTrack: (sessionId) =>
       request(`/tracking/sessions/${encodeURIComponent(sessionId)}/track`),
     liveFleet: () => request('/tracking/live'),

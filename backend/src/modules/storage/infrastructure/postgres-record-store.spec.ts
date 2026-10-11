@@ -17,9 +17,7 @@ describe.skipIf(!url)('PostgresRecordStore', () => {
       );
       await store.put('route-plans', 'PLAN-1', { id: 'PLAN-1', routes: [] });
       const reopened = new PostgresRecordStore(url!);
-      expect(await reopened.list('driver-sessions')).toEqual([
-        { id: 'RUTA-1', value: { n: 19 } },
-      ]);
+      expect(await reopened.list('driver-sessions')).toEqual([{ id: 'RUTA-1', value: { n: 19 } }]);
       await reopened.remove('route-plans', 'PLAN-1');
       expect(await reopened.list('route-plans')).toEqual([]);
       await reopened.close();

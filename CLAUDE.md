@@ -37,6 +37,11 @@ secretos (la única clave es la de TomTom de la empresa, ver abajo).
   el archivo (`src/lib/spreadsheet-file.ts`: `read-excel-file`/`write-excel-file`, no el
   paquete `xlsx`) y el servidor vuelve a validar todo en `importProducts`/`importOrders`
   (todo o nada). Geocodificación con `TomTomGeocoder` desde el navegador (`src/lib/geocoding.ts`).
+- Pedidos de punta a punta: `fulfillment/` (máquina de estados `order-status.ts` y
+  `OrderTracker`, historial en `ops_records`) y `epod/` (comprobante: `delivery-proof.ts`,
+  `rut.ts`, `DeliveryRegistry`; imágenes en `delivery_images`, migración 006). El teléfono
+  guarda los comprobantes sin señal en IndexedDB (`src/lib/delivery-outbox.ts`) y los reenvía
+  (idempotentes por id). La entrega sólo se registra con comprobante.
 - Enlaces de conductor con `app=conductor`: el teléfono queda sólo en el modo conductor
   (`src/lib/app-mode.ts`).
 - Sin datos de muestra ni simulación: la app parte vacía y la empresa carga bodega,

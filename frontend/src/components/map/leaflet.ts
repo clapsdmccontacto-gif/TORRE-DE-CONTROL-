@@ -90,6 +90,10 @@ export function useLeafletMap(containerRef: RefObject<HTMLDivElement | null>, zo
       unsubscribe();
       media.removeEventListener('change', reapply);
       themeObserver.disconnect();
+      // Leaflet termina la animación de zoom con un temporizador que no se cancela al
+      // quitar el mapa (cambiar de pantalla a mitad de un zoom); sin zoom en curso, el
+      // temporizador no hace nada.
+      (map as unknown as { _animatingZoom: boolean })._animatingZoom = false;
       map.remove();
       mapRef.current = null;
       layerRef.current = null;

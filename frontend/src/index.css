@@ -324,3 +324,24 @@
   border: 2px solid var(--card);
   box-shadow: 0 0 0 1px var(--series-1);
 }
+
+/* Comprobante imprimible: sólo se imprime el bloque marcado con .print-area. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .print-area,
+  .print-area * {
+    visibility: visible;
+  }
+  .print-area {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    border: none;
+    box-shadow: none;
+  }
+  .print-area .no-print {
+    display: none;
+  }
+}

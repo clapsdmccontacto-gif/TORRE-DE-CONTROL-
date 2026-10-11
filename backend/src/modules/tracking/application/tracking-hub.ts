@@ -4,7 +4,9 @@ import { newId } from '../../../common/ids.js';
 import { roundTo } from '../../../common/math.js';
 import { WriteQueue, type RecordStore } from '../../../common/record-store.js';
 import type { FleetUnit, PlannedRoute } from '../../routing/domain/optimizer.js';
+import type { DeliveryOutcome } from '../../epod/domain/delivery-proof.js';
 import type { RoutePlan } from '../../routing/application/route-planner.js';
+import type { DeliveryOrder } from '../../routing/domain/delivery.js';
 import {
   DEFAULT_TRACKING_POLICY,
   completeStop,
@@ -48,11 +50,25 @@ export interface DriverSession {
   stops: LiveStop[];
 }
 
+/** Lo que el conductor necesita saber del pedido y la obra (botón Llamar, dirección). */
+export interface StopDetails {
+  customerName: string | null;
+  address: string | null;
+  commune: string | null;
+  contactName: string | null;
+  contactPhone: string | null;
+  deliveryDate: string | null;
+  notes: string | null;
+}
+
 export interface LiveStop {
   deliveryId: string;
   siteName: string;
   location: LatLng;
   state: StopState;
+  /** Entregado, parcial o rechazado (cuando el conductor lo registró). */
+  outcome: DeliveryOutcome | null;
+  details: StopDetails | null;
   cargo: CargoLine[];
   weightKg: number;
 }
@@ -81,6 +97,8 @@ export interface TrackingEvent {
   sessionId: string;
   vehiclePlate: string;
   type: TrackingEventType | 'INICIO_RUTA' | 'FIN_RUTA' | 'RUTA_ASIGNADA';
+  /** Resultado, en los eventos de entrega. */
+  outcome?: DeliveryOutcome | null;
   siteName: string | null;
   message: string;
 }
@@ -102,6 +120,10 @@ export interface TrackingHubDeps {
   activePlan: () => RoutePlan | null;
   /** Dónde se guardan las rutas y su avance para retomarlas tras un reinicio del servidor. */
   store?: RecordStore;
+  /** Cliente, dirección y contacto de cada pedido (siempre al día con «Obras y pedidos»). */
+  details?: (deliveryId: string) => StopDetails | null;
+  /** La ruta del conductor tiene pedidos (al iniciar o al publicarse el plan): salen a ruta. */
+  onRouteStarted?: (session: DriverSession) => void;
   now?: () => number;
   policy?: TrackingPolicy;
 }
@@ -197,8 +219,22 @@ export class TrackingHub {
     const route = this.deps.activePlan()?.routes.find((r) => r.unitPlate === unit.plate) ?? null;
     const state = this.createState(driverName, driverPhone, unit, route);
     this.saveSession(state);
+    if (state.stops.length > 0) this.deps.onRouteStarted?.(state.session);
     this.notify();
     return state.session;
+  }
+
+  /** Ruta de un conductor (también terminada), para validar sus comprobantes. */
+  route(
+    sessionId: string,
+  ): { vehiclePlate: string; driverName: string; deliveryIds: string[] } | null {
+    const state = this.sessions.get(sessionId);
+    if (!state) return null;
+    return {
+      vehiclePlate: state.session.vehiclePlate,
+      driverName: state.session.driverName,
+      deliveryIds: state.stops.map((s) => s.deliveryId),
+    };
   }
 
   endSession(sessionId: string): DriverSession {
@@ -223,14 +259,36 @@ export class TrackingHub {
     return result;
   }
 
-  /** El conductor registró la entrega del pedido en la obra. */
-  completeStop(sessionId: string, deliveryId: string): DriverSession {
-    const state = this.activeState(sessionId);
-    const { stops, event } = completeStop(state.stops, deliveryId);
+  /**
+   * El conductor registró la entrega (con su comprobante). Vale también para una ruta ya
+   * terminada: el comprobante pudo llegar después, cuando el teléfono recuperó la señal.
+   */
+  completeStop(
+    sessionId: string,
+    deliveryId: string,
+    outcome: DeliveryOutcome = 'ENTREGADO',
+  ): DriverSession {
+    const state = this.sessions.get(sessionId);
+    if (!state) throw unknownSession();
+    const { stops, event } = completeStop(state.stops, deliveryId, outcome);
     state.stops = stops;
     if (event) {
-      const message = `${state.session.driverName} registró la entrega en ${event.siteName} (${state.session.vehiclePlate}).`;
-      this.record(state, event.type, event.siteName, message, new Date(this.now()).toISOString());
+      const { driverName, vehiclePlate } = state.session;
+      const what =
+        outcome === 'RECHAZADO'
+          ? 'un rechazo'
+          : outcome === 'ENTREGA_PARCIAL'
+            ? 'una entrega parcial'
+            : 'la entrega';
+      const message = `${driverName} registró ${what} en ${event.siteName} (${vehiclePlate}).`;
+      this.record(
+        state,
+        event.type,
+        event.siteName,
+        message,
+        new Date(this.now()).toISOString(),
+        outcome,
+      );
     }
     state.nextStopEtaMin = nextStopEta(
       state.stops,
@@ -254,21 +312,29 @@ export class TrackingHub {
       if (state.session.endedAt) continue;
       const route = plan.routes.find((r) => r.unitPlate === state.session.vehiclePlate) ?? null;
       const previous = new Map(state.stops.map((s) => [s.deliveryId, s]));
-      const planned = (route?.stops ?? []).map(
-        (s): TrackedStop => ({
-          deliveryId: s.deliveryId,
-          siteName: s.siteName,
-          location: s.location,
-          notifyEtaMinutes: s.notifyEtaMinutes,
-          state: previous.get(s.deliveryId)?.state ?? 'PENDIENTE',
-          proximityNotified: previous.get(s.deliveryId)?.proximityNotified ?? false,
-        }),
-      );
+      const planned = (route?.stops ?? []).map((s): TrackedStop => ({
+        deliveryId: s.deliveryId,
+        siteName: s.siteName,
+        location: s.location,
+        notifyEtaMinutes: s.notifyEtaMinutes,
+        state: previous.get(s.deliveryId)?.state ?? 'PENDIENTE',
+        proximityNotified: previous.get(s.deliveryId)?.proximityNotified ?? false,
+        outcome: previous.get(s.deliveryId)?.outcome ?? null,
+      }));
       const plannedIds = new Set(planned.map((s) => s.deliveryId));
-      const delivered = state.stops.filter(
-        (s) => s.state === 'COMPLETADA' && !plannedIds.has(s.deliveryId),
+      const elsewhere = new Set(
+        plan.routes
+          .filter((r) => r.unitPlate !== state.session.vehiclePlate)
+          .flatMap((r) => r.stops.map((s) => s.deliveryId)),
       );
-      const stops = [...delivered, ...planned];
+      // Se conservan lo ya entregado y lo que va a bordo sin replanificar (un pedido en ruta
+      // no entra a un plan nuevo); sólo sale lo que el plan nuevo le da a otro camión.
+      const kept = state.stops.filter(
+        (s) =>
+          !plannedIds.has(s.deliveryId) &&
+          (s.state === 'COMPLETADA' || !elsewhere.has(s.deliveryId)),
+      );
+      const stops = [...kept, ...planned];
       if (JSON.stringify(stops) === JSON.stringify(state.stops)) continue;
       state.stops = stops;
       for (const s of route?.stops ?? []) {
@@ -281,6 +347,7 @@ export class TrackingHub {
         this.policy,
       );
       state.session.stops = this.liveStops(state);
+      if (planned.length > 0) this.deps.onRouteStarted?.(state.session);
       const pending = planned.filter((s) => s.state !== 'COMPLETADA').length;
       this.record(
         state,
@@ -444,6 +511,8 @@ export class TrackingHub {
       siteName: s.siteName,
       location: s.location,
       state: s.state,
+      outcome: s.outcome ?? null,
+      details: this.deps.details?.(s.deliveryId) ?? null,
       cargo: state.stopCargo.get(s.deliveryId)?.cargo ?? [],
       weightKg: state.stopCargo.get(s.deliveryId)?.weightKg ?? 0,
     }));
@@ -467,6 +536,7 @@ export class TrackingHub {
     siteName: string | null,
     message: string,
     at: string,
+    outcome: DeliveryOutcome | null = null,
   ): void {
     this.events.push({
       id: newId('EV'),
@@ -476,6 +546,7 @@ export class TrackingHub {
       type,
       siteName,
       message,
+      ...(outcome ? { outcome } : {}),
     });
     this.events.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
     if (this.events.length > MAX_EVENTS) this.events.splice(0, this.events.length - MAX_EVENTS);
@@ -595,4 +666,17 @@ function mergeCargo(lines: readonly CargoLine[]): CargoLine[] {
     );
   }
   return [...bySku.values()];
+}
+
+/** Cliente, dirección y contacto del pedido para la app del conductor. */
+export function stopDetailsOf(order: DeliveryOrder): StopDetails {
+  return {
+    customerName: order.customerName ?? null,
+    address: order.site.address ?? null,
+    commune: order.site.commune,
+    contactName: order.site.contactName ?? null,
+    contactPhone: order.site.contactPhone ?? null,
+    deliveryDate: order.deliveryDate ?? null,
+    notes: order.notes ?? null,
+  };
 }

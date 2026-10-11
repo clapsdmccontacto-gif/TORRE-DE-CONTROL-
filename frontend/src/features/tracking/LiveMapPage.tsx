@@ -30,14 +30,21 @@ import {
   useLeafletMap,
 } from '@/components/map/leaflet';
 import { BasemapControl, TomTomKeySection } from '@/components/map/BasemapControl';
-import { StatTile, StatusBanner } from '@/components/status';
+import { StatTile, StatusBanner, StatusLabel } from '@/components/status';
 import { Button, LinkButton } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { NativeSelect } from '@/components/ui/input';
 import { RoadRouteDetails } from '@/features/routing/RoadRouteDetails';
 import { api, apiMode, errorMessage } from '@/lib/api';
 import { CLOUD_DEPLOY_URL } from '@/lib/cloud';
-import { STOP_STATE_LABEL, formatClock, formatKg, formatKm } from '@/lib/format';
+import {
+  OUTCOME_LABEL,
+  OUTCOME_STATUS,
+  STOP_STATE_LABEL,
+  formatClock,
+  formatKg,
+  formatKm,
+} from '@/lib/format';
 import {
   ROUTING_VEHICLES,
   remainingStreetRoute,
@@ -543,11 +550,25 @@ function DeviceDetail({ device, trackFixes }: { device: LiveDevice; trackFixes: 
             <p className="font-medium">Paradas</p>
             <ol className="grid gap-0.5">
               {device.stops.map((stop, i) => (
-                <li key={stop.deliveryId} className="flex justify-between gap-3">
+                <li key={stop.deliveryId} className="flex flex-wrap justify-between gap-x-3">
                   <span className="min-w-0 truncate">
                     {i + 1}. {stop.siteName}
                   </span>
-                  <span className="text-muted-foreground">{STOP_STATE_LABEL[stop.state]}</span>
+                  {stop.state === 'COMPLETADA' && stop.outcome ? (
+                    <span className="flex items-center gap-2">
+                      <StatusLabel status={OUTCOME_STATUS[stop.outcome]}>
+                        {OUTCOME_LABEL[stop.outcome]}
+                      </StatusLabel>
+                      <a
+                        className="font-medium underline"
+                        href={`#entregas?pedido=${encodeURIComponent(stop.deliveryId)}`}
+                      >
+                        Ver comprobante
+                      </a>
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">{STOP_STATE_LABEL[stop.state]}</span>
+                  )}
                 </li>
               ))}
             </ol>
