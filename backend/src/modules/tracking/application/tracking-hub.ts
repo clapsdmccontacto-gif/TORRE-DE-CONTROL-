@@ -124,11 +124,23 @@ export interface TrackingHubDeps {
   details?: (deliveryId: string) => StopDetails | null;
   /** La ruta del conductor tiene pedidos (al iniciar o al publicarse el plan): salen a ruta. */
   onRouteStarted?: (session: DriverSession) => void;
+  /** Pedidos asignados a mano a un camión desde despacho (fuera del plan publicado). */
+  extraStops?: (plate: string) => readonly ExtraStop[];
   now?: () => number;
   policy?: TrackingPolicy;
 }
 
 type StopCargo = { cargo: CargoLine[]; weightKg: number };
+
+/** Parada que no viene del plan (pedido asignado a mano a un camión). */
+export interface ExtraStop {
+  deliveryId: string;
+  siteName: string;
+  location: LatLng;
+  notifyEtaMinutes: number;
+  lines: CargoLine[];
+  weightKg: number;
+}
 
 interface SessionState {
   session: DriverSession;
@@ -222,6 +234,65 @@ export class TrackingHub {
     if (state.stops.length > 0) this.deps.onRouteStarted?.(state.session);
     this.notify();
     return state.session;
+  }
+
+  /** Camiones que el conductor puede elegir, con sus paradas (plan publicado y asignadas a mano). */
+  fleetUnits(): { plate: string; vehicleName: string; stops: number }[] {
+    const plan = this.deps.activePlan();
+    return this.deps.units().map((unit) => {
+      const planned = plan?.routes.find((r) => r.unitPlate === unit.plate)?.stops ?? [];
+      const extra = (this.deps.extraStops?.(unit.plate) ?? []).filter(
+        (e) => !planned.some((p) => p.deliveryId === e.deliveryId),
+      );
+      return {
+        plate: unit.plate,
+        vehicleName: unit.vehicle.name,
+        stops: planned.length + extra.length,
+      };
+    });
+  }
+
+  /**
+   * Se asignaron pedidos a mano a un camión: si su conductor está en ruta, los recibe
+   * sin reiniciar.
+   */
+  syncExtraStops(plate: string): void {
+    const extra = this.deps.extraStops?.(plate) ?? [];
+    let changed = false;
+    for (const state of this.sessions.values()) {
+      if (state.session.endedAt || state.session.vehiclePlate !== plate) continue;
+      const added = extra.filter((e) => !state.stops.some((s) => s.deliveryId === e.deliveryId));
+      if (added.length === 0) continue;
+      for (const stop of added) {
+        state.stops.push({
+          deliveryId: stop.deliveryId,
+          siteName: stop.siteName,
+          location: stop.location,
+          notifyEtaMinutes: stop.notifyEtaMinutes,
+          state: 'PENDIENTE',
+          proximityNotified: false,
+        });
+        state.stopCargo.set(stop.deliveryId, { cargo: stop.lines, weightKg: stop.weightKg });
+      }
+      state.nextStopEtaMin = nextStopEta(
+        state.stops,
+        state.fixes.at(-1) ?? null,
+        state.speedKmh,
+        this.policy,
+      );
+      state.session.stops = this.liveStops(state);
+      // No pasan a EN_RUTA aquí: el camión ya salió; lo hacen al registrar su entrega.
+      this.record(
+        state,
+        'RUTA_ASIGNADA',
+        null,
+        `${plate} recibió ${added.length === 1 ? 'un pedido asignado' : `${added.length} pedidos asignados`} desde despacho.`,
+        new Date(this.now()).toISOString(),
+      );
+      this.saveSession(state);
+      changed = true;
+    }
+    if (changed) this.notify();
   }
 
   /** Ruta de un conductor (también terminada), para validar sus comprobantes. */
@@ -397,7 +468,12 @@ export class TrackingHub {
     unit: FleetUnit,
     route: PlannedRoute | null,
   ): SessionState {
-    const stops: TrackedStop[] = (route?.stops ?? []).map((s) => ({
+    const planned = route?.stops ?? [];
+    const extra = (this.deps.extraStops?.(unit.plate) ?? []).filter(
+      (e) => !planned.some((p) => p.deliveryId === e.deliveryId),
+    );
+    const all = [...planned, ...extra];
+    const stops: TrackedStop[] = all.map((s) => ({
       deliveryId: s.deliveryId,
       siteName: s.siteName,
       location: s.location,
@@ -406,7 +482,7 @@ export class TrackingHub {
       proximityNotified: false,
     }));
     const stopCargo = new Map(
-      (route?.stops ?? []).map((s) => [s.deliveryId, { cargo: s.lines, weightKg: s.weightKg }]),
+      all.map((s) => [s.deliveryId, { cargo: s.lines, weightKg: s.weightKg }]),
     );
     const session: DriverSession = {
       id: newId('RUTA'),

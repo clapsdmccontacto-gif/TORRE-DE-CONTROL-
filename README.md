@@ -34,7 +34,7 @@ Esta primera entrega deja la base del proyecto:
 | **Datos de la empresa** (camiones, bodega, productos, obras, pedidos) guardados en PostgreSQL | Hecho, con tests (incluye PostgreSQL real) |
 | Publicación en internet (Docker + Render + PostgreSQL gratis) con clave de acceso | Listo para activar (sección 6) |
 | Planes publicados y rutas de conductores (avance y recorrido) guardados en PostgreSQL; entrega registrada por el conductor | Hecho, con tests (incluye PostgreSQL real) |
-| Importación desde Excel, e-POD con firma y foto, picking y despacho con código de barras | En construcción (fases 2 a 5) |
+| Importación desde Excel, e-POD con firma y foto, picking y despacho con código de barras, historial de cada pedido | Hecho, con tests (incluye PostgreSQL real y prueba en navegador) |
 | Login por roles, staging, restricciones de circulación | Próximas fases (ver hoja de ruta) |
 
 ---
@@ -634,6 +634,44 @@ y alertas (*atrasado* si venció su fecha de entrega, *demorado* si lleva más d
 picking, *con faltantes*). Se actualiza en vivo por Server-Sent Events
 (`/picking/stream`); la torre puede liberar un pedido tomado.
 
+### 5.9 Despacho: carga del camión con escaneo e historial de cada pedido
+
+**Despacho** es la segunda pestaña de la app de bodega (*Picking* · *Despacho*):
+
+1. El operario elige el **camión** (patente). Ve sus pedidos del plan publicado **en orden
+   de carga**: el N° 1 es el que se entrega último y va al fondo (`loadingOrder`,
+   `dispatch/domain/dispatch.ts`). Cada pedido muestra lo pickeado y lo ya subido.
+2. **Escanea cada producto al subirlo** (pistola, cámara o código escrito, igual que en el
+   picking). Reglas (`evaluateLoadScan`, con tests): el producto tiene que ser de un pedido
+   de ese camión y no puede pasar de lo pickeado (`YA_CARGADO`); si es de otro camión, el
+   aviso dice cuál (`OTRO_CAMION`: «va en el camión KJTR45»); código desconocido o producto
+   que no va en ningún camión son error. Sonido y vibración como en el picking; *Deshacer
+   último*.
+3. **Etiqueta por pedido** (botón *Etiqueta* o *Etiquetas* para todas): Code128 del N° de
+   pedido (`dispatch/domain/code128.ts`, con tests) con cliente, obra, dirección, contacto,
+   camión y N° de entrega, para imprimir o guardar en PDF. Escanear la etiqueta **sube el
+   bulto completo** (todo lo pickeado que falta de ese pedido). También se imprime desde
+   *Obras y pedidos*.
+4. **Pedidos sin plan publicado**: aparecen en *Pedidos sin camión* y se asignan a mano
+   (*Asignar a …*); queda quién lo hizo. Si el conductor de ese camión ya salió, el pedido
+   aparece en su ruta sin reiniciarla (`TrackingHub.syncExtraStops`). Un pedido del plan no
+   se reasigna (`PEDIDO_EN_PLAN`).
+5. **Cerrar despacho**: con todo a bordo, directo; si falta subir algo, cada faltante con
+   su motivo (no cupo, dañado u otro, explicado) o `CARGA_INCOMPLETA`. Los pedidos con algo
+   a bordo quedan **CARGADO** con camión, operario y hora; los que no tienen nada siguen en
+   bodega. Al iniciar la ruta el conductor, pasan a **EN_RUTA**.
+
+Cada lectura es un evento con id generado en el equipo (idempotente) y la carga en curso
+queda guardada (`DispatchDesk`, registros `dispatch-*` en `ops_records`): un reinicio del
+servidor no la pierde. Al cerrar se archiva la carga completa.
+
+**Historial de cada pedido** (torre): en *Obras y pedidos* (botón de historial de cada
+pedido) y en *Entregas* (dentro del comprobante), la línea de tiempo completa: quién lo
+pickeó y cuándo (con faltantes), en qué camión se cargó, quién y cuándo (con lo que no
+subió), cuándo salió a ruta y con quién, y a quién se entregó con firma, foto, distancia a
+la obra y hora. *Obras y pedidos* muestra además **qué camión lleva qué** (pedidos cargados
+y en ruta por patente).
+
 ### Otros endpoints
 
 | Método | Ruta | Uso |
@@ -657,7 +695,7 @@ picking, *con faltantes*). Se actualiza en vivo por Server-Sent Events
 | POST | `/api/v1/routing/plans/:id/routes/:plate/road` | Aplica a una ruta del plan su recorrido por calles (orden, tramos, trazado) |
 | POST | `/api/v1/routing/plans/:id/publish` | Publica el plan a la flota |
 | GET | `/api/v1/routing/plans/active` | Plan publicado |
-| GET | `/api/v1/tracking/units` | Vehículos para el conductor, con sus paradas asignadas |
+| GET | `/api/v1/tracking/units` | Vehículos para el conductor, con sus paradas (plan publicado y asignadas a mano) |
 | POST | `/api/v1/tracking/sessions` | Inicia la ruta de un conductor |
 | POST | `/api/v1/tracking/sessions/:id/positions` | Lote de lecturas GPS (hasta 500) |
 | POST | `/api/v1/tracking/sessions/:id/end` | Termina la ruta |
@@ -669,6 +707,9 @@ picking, *con faltantes*). Se actualiza en vivo por Server-Sent Events
 | POST | `/api/v1/picking/orders/:id/claim` · `/release` | Tomar · liberar un pedido (`force` desde la torre) |
 | POST | `/api/v1/picking/orders/:id/scans` · `/undo` · `/close` | Lectura (idempotente por `id`) · deshacer · cerrar con faltantes |
 | GET | `/api/v1/picking/monitor` · `/picking/stream` | Monitor de picking (foto · flujo SSE) |
+| GET | `/api/v1/dispatch/trucks` · `/dispatch/trucks/:plate` | Camiones con su avance de carga · pedidos de uno en orden de carga |
+| POST | `/api/v1/dispatch/trucks/:plate/assign` | Asigna a mano un pedido sin plan (`orderId`, `operator`) |
+| POST | `/api/v1/dispatch/trucks/:plate/scans` · `/undo` · `/close` | Lectura al subir (idempotente por `id`) · deshacer · cerrar el despacho |
 | GET | `/api/v1/tracking/sessions/:id/track` | Trayecto recorrido y resumen |
 | GET | `/api/v1/tracking/live` · `/api/v1/tracking/stream` | Flota en vivo (foto · flujo SSE) |
 
@@ -678,6 +719,8 @@ Errores: `400 SOLICITUD_INVALIDA` con detalle por campo (Zod) y `422` para regla
 `SESION_DESCONOCIDA`, `PARADA_DESCONOCIDA`, `CODIGO_INVALIDO`, `CODIGO_DUPLICADO`,
 `COMPROBANTE_INVALIDO`, `RUTA_DESCONOCIDA`, `PEDIDO_FUERA_DE_RUTA`, `PEDIDO_YA_ENTREGADO`,
 `TRANSICION_INVALIDA`, `PEDIDO_TOMADO`, `PEDIDO_NO_TOMADO`, `FALTAN_PRODUCTOS`, `PICKING_VACIO`,
+`PEDIDO_EN_PLAN`, `PEDIDO_NO_DISPONIBLE`, `CARGA_INCOMPLETA`, `NADA_QUE_DESHACER`,
+`VEHICULO_DESCONOCIDO`, `PEDIDO_DESCONOCIDO`, `OPERARIO_INVALIDO`,
 `IMPORTACION_INVALIDA`, `NUBE_YA_CONFIGURADA`), `401 CLAVE_INCORRECTA`,
 `403 NUBE_SIN_CLAVE` y
 `429 DEMASIADOS_INTENTOS`.
@@ -743,6 +786,29 @@ Cualquier servicio que ejecute Docker sirve igual (Railway, Fly.io, un VPS).
   ejecución) → Artifacts*. Se descarga y se abre con doble clic o desde el gestor de
   archivos del teléfono. También se genera localmente con `npm run build:html` (queda en
   `frontend/dist/`).
+
+### Guía rápida para operarios y conductores
+
+En *Flota y bodega* están los dos enlaces (traen la clave): se mandan por WhatsApp y el
+teléfono queda sólo en esa app.
+
+**Operario de bodega** (enlace de bodega, celular o pistola lectora):
+
+1. Escribe su nombre una vez.
+2. *Picking*: *Tomar pedido* → recorre la lista (ordenada por ubicación) escaneando cada
+   producto → *Terminar picking*, o *Cerrar con faltantes* indicando el motivo.
+3. *Despacho*: elige el camión → sube los pedidos en el orden que muestra (el N° 1 al
+   fondo) escaneando cada producto o la etiqueta del pedido → *Cerrar despacho*. Si un
+   producto es de otro camión, la app lo dice con la patente correcta.
+
+**Conductor** (enlace de conductor, su teléfono):
+
+1. Escribe su nombre, elige su camión e inicia la ruta (la pantalla queda encendida).
+2. Ve *Mis pedidos* en orden de entrega (cliente, dirección, contacto con *Llamar*,
+   productos) y el mapa con su ruta; *Waze* o *Google Maps* por parada.
+3. En la obra: *Entregar (firma y foto)* → cantidades → nombre y RUT de quien recibe →
+   firma con el dedo → foto del lugar → *Registrar entrega*. Sin señal, queda pendiente y
+   se envía sola.
 
 ### Desarrollo
 

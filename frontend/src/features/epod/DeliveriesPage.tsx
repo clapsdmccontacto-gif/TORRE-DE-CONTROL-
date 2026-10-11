@@ -7,7 +7,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input, NativeSelect } from '@/components/ui/input';
 import { api, apiMode, errorMessage } from '@/lib/api';
 import { OUTCOME_LABEL, OUTCOME_STATUS, formatDateTime } from '@/lib/format';
-import type { DeliveryOutcome, DeliveryProof } from '@/types/api';
+import type { DeliveryOutcome, DeliveryProof, OrderTrack } from '@/types/api';
+import { OrderTimeline } from '../fulfillment/OrderTimeline';
 import { ProofImage } from './ProofImage';
 import { ProofMap } from './ProofMap';
 
@@ -38,6 +39,7 @@ export function DeliveriesPage() {
   const [outcome, setOutcome] = useState<DeliveryOutcome | ''>('');
   const [order, setOrder] = useState(orderFromHash);
   const [proofs, setProofs] = useState<DeliveryProof[] | null>(null);
+  const [tracks, setTracks] = useState<Map<string, OrderTrack>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
 
@@ -61,8 +63,10 @@ export function DeliveriesPage() {
                 outcome: outcome || undefined,
               },
         )
-        .then((list) => {
+        .then(async (list) => {
+          const history = await api.orderTracks().catch(() => []);
           if (!active) return;
+          setTracks(new Map(history.map((t) => [t.orderId, t])));
           setProofs(list);
           setError(null);
           if (order && list[0]) setOpen(list[0].id);
@@ -183,6 +187,7 @@ export function DeliveriesPage() {
         <ProofCard
           key={proof.id}
           proof={proof}
+          track={tracks.get(proof.orderId) ?? null}
           open={open === proof.id}
           onToggle={() => setOpen(open === proof.id ? null : proof.id)}
         />
@@ -193,10 +198,12 @@ export function DeliveriesPage() {
 
 function ProofCard({
   proof,
+  track,
   open,
   onToggle,
 }: {
   proof: DeliveryProof;
+  track: OrderTrack | null;
   open: boolean;
   onToggle: () => void;
 }) {
@@ -276,7 +283,7 @@ function ProofCard({
                     proofId={proof.id}
                     imageId={signature.id}
                     alt={`Firma de ${proof.receiverName ?? 'quien recibe'}`}
-                    className="max-h-40 w-full rounded-md border bg-white object-contain"
+                    className="max-h-40 w-full rounded-md border bg-label-paper object-contain"
                   />
                 </figure>
               )}
@@ -295,6 +302,10 @@ function ProofCard({
               ))}
             </div>
             <ProofMap proof={proof} />
+            <div className="grid gap-2">
+              <p className="font-medium">Historial del pedido</p>
+              <OrderTimeline orderId={proof.orderId} track={track} proof={proof} />
+            </div>
             <p className="text-xs text-muted-foreground">
               Registrado en el teléfono {formatDateTime(proof.capturedAt)} · recibido en la torre{' '}
               {formatDateTime(proof.receivedAt)} · comprobante {proof.id}

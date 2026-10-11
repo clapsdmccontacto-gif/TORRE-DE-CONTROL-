@@ -119,6 +119,41 @@ describe('TrackingHub', () => {
     expect(hub.snapshot().events[0].type).toBe('RUTA_ASIGNADA');
   });
 
+  it('los pedidos asignados a mano entran a la ruta (al iniciar y en ruta)', () => {
+    let extra: {
+      deliveryId: string;
+      siteName: string;
+      location: { lat: number; lng: number };
+      notifyEtaMinutes: number;
+      lines: { sku: string; name: string; quantity: number }[];
+      weightKg: number;
+    }[] = [];
+    const units = [...DEMO_UNITS];
+    const hub = new TrackingHub({
+      units: () => units,
+      activePlan: () => null,
+      extraStops: () => extra,
+    });
+    const stop = {
+      deliveryId: 'NV-MANUAL',
+      siteName: 'Casa Muñoz',
+      location: { lat: -37.455, lng: -72.33 },
+      notifyEtaMinutes: 15,
+      lines: [{ sku: 'CEM', name: 'Cemento', quantity: 3 }],
+      weightKg: 75,
+    };
+    const session = hub.startSession({ driverName: 'Ana', vehiclePlate: 'DEMO-01' });
+    expect(session.stops).toEqual([]);
+    extra = [stop];
+    hub.syncExtraStops('DEMO-01');
+    const device = hub.snapshot().devices[0];
+    expect(device.stops.map((s) => s.deliveryId)).toEqual(['NV-MANUAL']);
+    expect(device.cargoWeightKg).toBe(75);
+    expect(hub.route(session.id)?.deliveryIds).toEqual(['NV-MANUAL']);
+    const next = hub.startSession({ driverName: 'Luis', vehiclePlate: 'DEMO-01' });
+    expect(next.stops.map((s) => s.deliveryId)).toEqual(['NV-MANUAL']);
+  });
+
   it('un plan nuevo no le quita al camión lo que ya lleva a bordo', () => {
     const { hub, planner, plan } = setup();
     planner.onPublish((published) => hub.planPublished(published));

@@ -11,7 +11,7 @@ import {
   Undo2,
   Unlock,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { StatusBanner, StatusLabel } from '@/components/status';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -21,6 +21,7 @@ import { api, errorMessage } from '@/lib/api';
 import type { CartType, MixViolation, PickView, ShortageReason } from '@/types/api';
 import { CameraScanner } from './CameraScanner';
 import { signal } from './feedback';
+import { ScanField } from './ScanField';
 
 const CART_LABEL: Record<CartType, string> = {
   MODULAR: 'Carro modular',
@@ -51,7 +52,6 @@ export function PickingScreen({
   onExit: () => void;
 }) {
   const [view, setView] = useState(initial);
-  const [code, setCode] = useState('');
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [camera, setCamera] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -60,27 +60,10 @@ export function PickingScreen({
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   const cartRef = useRef<CartType>(initial.cartType);
   const [cartType, setCartType] = useState<CartType>(initial.cartType);
   const orderId = initial.orderId;
-
-  // La pistola escribe donde está el foco: el campo vuelve a tomarlo solo.
-  useEffect(() => {
-    if (closing) return;
-    const refocus = () => {
-      const active = document.activeElement;
-      const typing =
-        active instanceof HTMLInputElement ||
-        active instanceof HTMLSelectElement ||
-        active instanceof HTMLTextAreaElement;
-      if (!typing) inputRef.current?.focus();
-    };
-    const timer = setInterval(refocus, 800);
-    refocus();
-    return () => clearInterval(timer);
-  }, [closing]);
 
   function scan(raw: string) {
     const value = raw.trim();
@@ -178,34 +161,12 @@ export function PickingScreen({
             {Math.round(view.progress.fraction * 100)} %
           </p>
           {view.notes && <p className="text-muted-foreground italic">{view.notes}</p>}
-          <form
-            className="grid gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              scan(code);
-              setCode('');
-            }}
-          >
-            <label className="grid gap-1.5" htmlFor="pick-code">
-              <span className="font-medium">Escanee con la pistola o escriba el código</span>
-            </label>
-            <div className="flex gap-2">
-              <Input
-                ref={inputRef}
-                id="pick-code"
-                className="h-12 text-base"
-                inputMode="text"
-                autoComplete="off"
-                autoCapitalize="characters"
-                spellCheck={false}
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-              />
-              <Button type="submit" className="h-12" disabled={!code.trim()}>
-                Agregar
-              </Button>
-            </div>
-          </form>
+          <ScanField
+            id="pick-code"
+            label="Escanee con la pistola o escriba el código"
+            onScan={scan}
+            paused={closing}
+          />
           {feedback && (
             <div
               role="status"

@@ -1,5 +1,5 @@
 import { newId } from '@core/common/ids';
-import { ClipboardList, LoaderCircle, LogIn, User } from 'lucide-react';
+import { ClipboardList, LoaderCircle, LogIn, PackageSearch, Truck, User } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { StatusBanner, StatusLabel } from '@/components/status';
 import { Badge } from '@/components/ui/badge';
@@ -8,10 +8,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { api, apiMode, errorMessage } from '@/lib/api';
 import type { PickMonitor, PickMonitorItem, PickView } from '@/types/api';
+import { DispatchScreen } from './DispatchScreen';
 import { PickingScreen } from './PickingScreen';
 
 const OPERATOR_KEY = 'torre-control.operator';
 const DEVICE_KEY = 'torre-control.device-id';
+const TAB_KEY = 'torre-control.warehouse-tab';
+
+type Tab = 'picking' | 'despacho';
 
 function read(key: string): string {
   try {
@@ -41,7 +45,8 @@ function deviceId(): string {
 
 /**
  * App de bodega para los operarios: su nombre (queda en el equipo), los pedidos por
- * preparar en vivo (quién tiene cada uno) y el picking con escaneo.
+ * preparar en vivo (quién tiene cada uno) con el picking por escaneo, y el despacho
+ * (carga de cada camión).
  */
 export function WarehouseApp() {
   const [operator, setOperator] = useState(() => read(OPERATOR_KEY));
@@ -52,6 +57,9 @@ export function WarehouseApp() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [device] = useState(deviceId);
+  const [tab, setTab] = useState<Tab>(() =>
+    read(TAB_KEY) === 'despacho' ? 'despacho' : 'picking',
+  );
 
   useEffect(
     () =>
@@ -114,6 +122,57 @@ export function WarehouseApp() {
     );
   }
 
+  const header = (
+    <>
+      <p className="flex flex-wrap items-center justify-between gap-2 text-sm">
+        <span className="flex items-center gap-2">
+          <User className="size-4" aria-hidden /> {operator}
+        </span>
+        <button
+          type="button"
+          className="min-h-11 text-muted-foreground underline-offset-4 hover:underline"
+          onClick={() => {
+            write(OPERATOR_KEY, '');
+            setOperator('');
+          }}
+        >
+          Cambiar de operario
+        </button>
+      </p>
+      <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1" role="tablist">
+        {(
+          [
+            ['picking', 'Picking', PackageSearch],
+            ['despacho', 'Despacho', Truck],
+          ] as const
+        ).map(([key, label, Icon]) => (
+          <Button
+            key={key}
+            role="tab"
+            aria-selected={tab === key}
+            variant={tab === key ? 'default' : 'ghost'}
+            className="h-11 text-base"
+            onClick={() => {
+              write(TAB_KEY, key);
+              setTab(key);
+            }}
+          >
+            <Icon /> {label}
+          </Button>
+        ))}
+      </div>
+    </>
+  );
+
+  if (tab === 'despacho') {
+    return (
+      <div className="mx-auto grid w-full max-w-lg gap-4">
+        {header}
+        <DispatchScreen operator={operator} device={device} />
+      </div>
+    );
+  }
+
   if (current) {
     return (
       <div className="mx-auto w-full max-w-lg">
@@ -136,21 +195,7 @@ export function WarehouseApp() {
 
   return (
     <div className="mx-auto grid w-full max-w-lg gap-4">
-      <p className="flex flex-wrap items-center justify-between gap-2 text-sm">
-        <span className="flex items-center gap-2">
-          <User className="size-4" aria-hidden /> {operator}
-        </span>
-        <button
-          type="button"
-          className="text-muted-foreground underline-offset-4 hover:underline"
-          onClick={() => {
-            write(OPERATOR_KEY, '');
-            setOperator('');
-          }}
-        >
-          Cambiar de operario
-        </button>
-      </p>
+      {header}
       {offline && apiMode === 'http' && (
         <StatusBanner status="warning" title="Sin conexión con la nube">
           Reintentando solo. La lista puede no estar al día.

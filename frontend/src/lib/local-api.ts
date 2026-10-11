@@ -21,6 +21,7 @@ import { proofOrderOf, type DeliveryProof } from '@core/modules/epod/domain/deli
 import { OrderTracker } from '@core/modules/fulfillment/application/order-tracker';
 import { isPlannable } from '@core/modules/fulfillment/domain/order-status';
 import { PickingDesk } from '@core/modules/picking/application/picking-desk';
+import { DispatchDesk } from '@core/modules/dispatch/application/dispatch-desk';
 import { RoutePlanner } from '@core/modules/routing/application/route-planner';
 import { TrackingHub, stopDetailsOf } from '@core/modules/tracking/application/tracking-hub';
 import { ApiError } from '@/lib/api-error';
@@ -106,6 +107,7 @@ interface LocalEngine {
   tracker: OrderTracker;
   registry: DeliveryRegistry;
   desk: PickingDesk;
+  dispatch: DispatchDesk;
 }
 
 let localEngine: LocalEngine | null = null;
@@ -121,10 +123,27 @@ function engine(): LocalEngine {
     units: () => data.units(),
     store: localRecords,
   });
+  const desk = new PickingDesk({
+    orders: () => data.orders(),
+    products: () => data.products(),
+    tracker,
+    routeOrder: () => planner.routeOrder(),
+    store: localRecords,
+  });
+  const dispatch = new DispatchDesk({
+    orders: () => data.orders(),
+    products: () => data.products(),
+    units: () => data.units(),
+    tracker,
+    picked: (id) => desk.picked(id),
+    routeOrder: () => planner.routeOrder(),
+    store: localRecords,
+  });
   const hub = new TrackingHub({
     units: () => planner.units(),
     activePlan: () => planner.activePlan(),
     store: localRecords,
+    extraStops: (plate) => dispatch.manualStops(plate),
     details: (id) => {
       const order = data.orders().find((o) => o.id === id);
       return order ? stopDetailsOf(order) : null;
@@ -142,6 +161,7 @@ function engine(): LocalEngine {
     },
   });
   planner.onPublish((plan) => hub.planPublished(plan));
+  dispatch.onAssigned((plate) => hub.syncExtraStops(plate));
   const registry = new DeliveryRegistry({
     store: localProofs,
     order: (id) => {
@@ -154,14 +174,7 @@ function engine(): LocalEngine {
       hub.completeStop(proof.sessionId, proof.orderId, proof.outcome);
     },
   });
-  const desk = new PickingDesk({
-    orders: () => data.orders(),
-    products: () => data.products(),
-    tracker,
-    routeOrder: () => planner.routeOrder(),
-    store: localRecords,
-  });
-  localEngine = { data, planner, hub, tracker, registry, desk };
+  localEngine = { data, planner, hub, tracker, registry, desk, dispatch };
   return localEngine;
 }
 
@@ -174,6 +187,7 @@ async function ready() {
     current.hub.ready,
     current.tracker.ready,
     current.desk.ready,
+    current.dispatch.ready,
   ]);
   return current;
 }
@@ -234,7 +248,7 @@ export const localApi: TorreApi = {
   publishPlan: (planId) => run(async () => (await ready()).planner.publish(planId)),
   activePlan: async () => (await ready()).planner.activePlan(),
 
-  fleetUnits: async () => (await ready()).planner.fleetUnits(),
+  fleetUnits: async () => (await ready()).hub.fleetUnits(),
   startDriverSession: (input) => run(async () => (await ready()).hub.startSession(input)),
   sendPositions: (sessionId, fixes) =>
     run(async () => (await ready()).hub.ingest(sessionId, fixes)),
@@ -273,6 +287,15 @@ export const localApi: TorreApi = {
     void ready().then(send);
     return unsubscribe;
   },
+
+  dispatchTrucks: async () => (await ready()).dispatch.summaries(),
+  dispatchTruck: (plate) => run(async () => (await ready()).dispatch.truck(plate)),
+  assignToTruck: (plate, input) =>
+    run(async () => (await ready()).dispatch.assign({ plate, ...input })),
+  scanLoad: (plate, input) => run(async () => (await ready()).dispatch.scan({ plate, ...input })),
+  undoLoad: (plate, input) => run(async () => (await ready()).dispatch.undo({ plate, ...input })),
+  closeLoad: (plate, input) => run(async () => (await ready()).dispatch.close({ plate, ...input })),
+
   deviceTrack: (sessionId) => run(async () => (await ready()).hub.track(sessionId)),
   liveFleet: async () => (await ready()).hub.snapshot(),
   subscribeFleet: (onSnapshot) => {

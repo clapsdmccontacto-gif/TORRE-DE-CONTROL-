@@ -31,6 +31,12 @@ import type {
 import type { CartType } from '@core/modules/picking/domain/cart';
 import type { ShortageReason } from '@core/modules/picking/domain/pick-task';
 import type {
+  LoadScanResult,
+  TruckLoadView,
+  TruckSummary,
+} from '@core/modules/dispatch/application/dispatch-desk';
+import type { LoadShortageReason } from '@core/modules/dispatch/domain/dispatch';
+import type {
   DriverSession,
   FleetSnapshot,
   IngestResult,
@@ -149,7 +155,11 @@ export type {
   DeliveryProof,
   DeliverySubmission,
 } from '@core/modules/epod/domain/delivery-proof';
-export type { OrderStatus, OrderTrack } from '@core/modules/fulfillment/domain/order-status';
+export type {
+  OrderEvent,
+  OrderStatus,
+  OrderTrack,
+} from '@core/modules/fulfillment/domain/order-status';
 export type {
   PickAlert,
   PickEvent,
@@ -162,6 +172,14 @@ export type {
 export type { PickLine, ShortageReason } from '@core/modules/picking/domain/pick-task';
 export type { CartType } from '@core/modules/picking/domain/cart';
 export type { MixViolation } from '@core/modules/picking/domain/mix-validator';
+export type {
+  LoadEvent,
+  LoadOrderView,
+  LoadScanResult,
+  TruckLoadView,
+  TruckSummary,
+} from '@core/modules/dispatch/application/dispatch-desk';
+export type { LoadShortageReason } from '@core/modules/dispatch/domain/dispatch';
 
 export interface DeliveryProofFilter {
   /** Desde / hasta (ISO 8601). */
@@ -275,6 +293,34 @@ export interface TorreApi {
   pickingMonitor(): Promise<PickMonitor>;
   /** Monitor en vivo; devuelve la función para dejar de escuchar. */
   subscribePicking(onSnapshot: (monitor: PickMonitor) => void, onError?: () => void): () => void;
+
+  // Despacho: carga de cada camión con escaneo.
+  dispatchTrucks(): Promise<TruckSummary[]>;
+  dispatchTruck(plate: string): Promise<TruckLoadView>;
+  /** Pedido sin plan publicado: se asigna a mano a un camión (queda quién lo hizo). */
+  assignToTruck(
+    plate: string,
+    input: { orderId: string; operator: string },
+  ): Promise<TruckLoadView>;
+  /** Una lectura al subir al camión (idempotente por `id`). */
+  scanLoad(
+    plate: string,
+    input: { id: string; code: string; operator: string; device: string | null },
+  ): Promise<LoadScanResult>;
+  undoLoad(plate: string, input: { id: string; operator: string }): Promise<TruckLoadView>;
+  closeLoad(
+    plate: string,
+    input: {
+      operator: string;
+      shortages: {
+        orderId: string;
+        sku: string;
+        reason: LoadShortageReason;
+        note: string | null;
+      }[];
+    },
+  ): Promise<TruckLoadView>;
+
   deviceTrack(sessionId: string): Promise<TrackResponse>;
   liveFleet(): Promise<FleetSnapshot>;
   /** Fotos de la flota en vivo; devuelve la función para dejar de escuchar. */

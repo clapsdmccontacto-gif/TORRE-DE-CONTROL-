@@ -1,7 +1,6 @@
 import { Body, Controller, Get, HttpCode, MessageEvent, Param, Post, Sse } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { ZodValidationPipe } from '../../../common/zod-validation.pipe.js';
-import { RoutePlanner } from '../../routing/application/route-planner.js';
 import { TrackingHub } from '../application/tracking-hub.js';
 import {
   positionsSchema,
@@ -14,15 +13,12 @@ const KEEP_ALIVE_MS = 10_000;
 
 @Controller('tracking')
 export class TrackingController {
-  constructor(
-    private readonly hub: TrackingHub,
-    private readonly planner: RoutePlanner,
-  ) {}
+  constructor(private readonly hub: TrackingHub) {}
 
-  /** Vehículos que el conductor puede elegir, con su ruta del plan publicado. */
+  /** Vehículos que el conductor puede elegir, con sus paradas (plan y asignadas a mano). */
   @Get('units')
   units() {
-    return this.planner.fleetUnits();
+    return this.hub.fleetUnits();
   }
 
   @Post('sessions')

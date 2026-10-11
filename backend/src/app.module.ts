@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { HealthController } from './health/health.controller.js';
 import { CatalogModule } from './modules/catalog/catalog.module.js';
 import { CloudModule } from './modules/cloud/cloud.module.js';
+import { DispatchModule } from './modules/dispatch/dispatch.module.js';
 import { EpodModule } from './modules/epod/epod.module.js';
 import { FulfillmentModule } from './modules/fulfillment/fulfillment.module.js';
 import { LoadPlanningModule } from './modules/load-planning/load-planning.module.js';
@@ -21,6 +22,7 @@ import { TrackingModule } from './modules/tracking/tracking.module.js';
     PickingModule,
     LoadPlanningModule,
     RoutingModule,
+    DispatchModule,
     TrackingModule,
     EpodModule,
   ],

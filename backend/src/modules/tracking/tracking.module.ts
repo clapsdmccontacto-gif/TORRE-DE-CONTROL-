@@ -1,5 +1,7 @@
 import { Inject, Module, type OnApplicationShutdown } from '@nestjs/common';
 import type { RecordStore } from '../../common/record-store.js';
+import { DispatchDesk } from '../dispatch/application/dispatch-desk.js';
+import { DispatchModule } from '../dispatch/dispatch.module.js';
 import { OrderTracker } from '../fulfillment/application/order-tracker.js';
 import { MasterData } from '../master-data/application/master-data.js';
 import { RoutePlanner } from '../routing/application/route-planner.js';
@@ -9,7 +11,7 @@ import { TrackingHub, stopDetailsOf } from './application/tracking-hub.js';
 import { TrackingController } from './http/tracking.controller.js';
 
 @Module({
-  imports: [RoutingModule],
+  imports: [RoutingModule, DispatchModule],
   controllers: [TrackingController],
   providers: [
     {
@@ -19,11 +21,13 @@ import { TrackingController } from './http/tracking.controller.js';
         store: RecordStore,
         data: MasterData,
         tracker: OrderTracker,
+        dispatch: DispatchDesk,
       ) => {
         const hub = new TrackingHub({
           units: () => planner.units(),
           activePlan: () => planner.activePlan(),
           store,
+          extraStops: (plate) => dispatch.manualStops(plate),
           details: (id) => {
             const order = data.orders().find((o) => o.id === id);
             return order ? stopDetailsOf(order) : null;
@@ -43,9 +47,10 @@ import { TrackingController } from './http/tracking.controller.js';
         });
         await hub.ready;
         planner.onPublish((plan) => hub.planPublished(plan));
+        dispatch.onAssigned((plate) => hub.syncExtraStops(plate));
         return hub;
       },
-      inject: [RoutePlanner, RECORD_STORE, MasterData, OrderTracker],
+      inject: [RoutePlanner, RECORD_STORE, MasterData, OrderTracker, DispatchDesk],
     },
   ],
   exports: [TrackingHub],

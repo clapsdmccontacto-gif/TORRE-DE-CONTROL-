@@ -1,14 +1,17 @@
 import {
   ClipboardList,
   HardHat,
+  History,
   LoaderCircle,
   MapPinned,
   Pencil,
   Phone,
   Plus,
+  Printer,
   Save,
   Search,
   Trash2,
+  Truck,
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
@@ -30,6 +33,9 @@ import type {
   SiteInput,
   SkuQuantity,
 } from '@/types/api';
+import { labelsFor, type LabelData } from '../dispatch/labels';
+import { LabelSheet } from '../dispatch/OrderLabel';
+import { OrderTimeline } from '../fulfillment/OrderTimeline';
 import { ImportOrdersCard } from './import/ImportOrdersCard';
 import { useMasterData } from './use-master-data';
 
@@ -334,7 +340,9 @@ function OrdersCard({
   change: Change;
 }) {
   const products = data.products;
-  const tracks = useOrderTracks(data);
+  const { tracks, planned } = useOrderTracks(data);
+  const [history, setHistory] = useState<string | null>(null);
+  const [labels, setLabels] = useState<LabelData[] | null>(null);
   const [id, setId] = useState('');
   const [siteId, setSiteId] = useState('');
   const [lines, setLines] = useState<SkuQuantity[]>([]);
@@ -371,71 +379,102 @@ function OrdersCard({
         </CardDescription>
       </CardHeader>
       <CardContent className="grid grid-cols-1 gap-4 text-sm">
+        {labels && <LabelSheet labels={labels} onClose={() => setLabels(null)} />}
+        <TrucksSummary tracks={tracks} />
         {data.orders.length === 0 ? (
           <p className="text-muted-foreground">No hay pedidos por despachar.</p>
         ) : (
           <ul className="grid grid-cols-1 gap-2">
             {data.orders.map((o) => (
-              <li
-                key={o.id}
-                className="flex items-start justify-between gap-3 rounded-lg border p-3"
-              >
-                <span className="grid min-w-0 gap-1">
-                  <span className="font-medium">
-                    {o.id} <span className="font-normal text-muted-foreground">· {o.siteName}</span>
-                  </span>
-                  {(o.customerName || o.deliveryDate) && (
+              <li key={o.id} className="grid gap-3 rounded-lg border p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <span className="grid min-w-0 gap-1">
+                    <span className="font-medium">
+                      {o.id}{' '}
+                      <span className="font-normal text-muted-foreground">· {o.siteName}</span>
+                    </span>
+                    {(o.customerName || o.deliveryDate) && (
+                      <span className="text-muted-foreground">
+                        {[o.customerName, o.deliveryDate && `Entrega ${formatDate(o.deliveryDate)}`]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </span>
+                    )}
+                    {o.notes && <span className="text-muted-foreground italic">{o.notes}</span>}
                     <span className="text-muted-foreground">
-                      {[o.customerName, o.deliveryDate && `Entrega ${formatDate(o.deliveryDate)}`]
-                        .filter(Boolean)
+                      {o.lines
+                        .map(
+                          (l) =>
+                            `${l.quantity} × ${products.find((p) => p.sku === l.sku)?.name ?? l.sku}`,
+                        )
                         .join(' · ')}
                     </span>
-                  )}
-                  {o.notes && <span className="text-muted-foreground italic">{o.notes}</span>}
-                  <span className="text-muted-foreground">
-                    {o.lines
-                      .map(
-                        (l) =>
-                          `${l.quantity} × ${products.find((p) => p.sku === l.sku)?.name ?? l.sku}`,
-                      )
-                      .join(' · ')}
+                    <span className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline">{formatKg(o.weightKg)}</Badge>
+                      <OrderStatusLabel track={tracks.get(o.id) ?? null} />
+                    </span>
                   </span>
-                  <span className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline">{formatKg(o.weightKg)}</Badge>
-                    <OrderStatusLabel track={tracks.get(o.id) ?? null} />
+                  <span className="flex shrink-0 flex-wrap justify-end gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Historial de ${o.id}`}
+                      aria-expanded={history === o.id}
+                      onClick={() => setHistory(history === o.id ? null : o.id)}
+                    >
+                      <History />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Etiqueta de ${o.id}`}
+                      onClick={() => {
+                        const track = tracks.get(o.id);
+                        const plan = planned.get(o.id);
+                        const truck = track?.vehiclePlate
+                          ? { plate: track.vehiclePlate, position: plan?.position ?? null }
+                          : plan;
+                        setLabels(labelsFor([o.id], data, new Map(truck ? [[o.id, truck]] : [])));
+                      }}
+                    >
+                      <Printer />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Editar ${o.id}`}
+                      onClick={() => {
+                        setId(o.id);
+                        setSiteId(o.siteId);
+                        setLines(o.lines.map((l) => ({ ...l })));
+                        setDetails({
+                          customerName: o.customerName ?? '',
+                          deliveryDate: o.deliveryDate ?? '',
+                          notes: o.notes ?? '',
+                        });
+                      }}
+                    >
+                      <Pencil />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Quitar ${o.id}`}
+                      disabled={busy}
+                      onClick={() =>
+                        window.confirm(`¿Quitar el pedido ${o.id}?`) &&
+                        void change(() => api.removeOrder(o.id))
+                      }
+                    >
+                      <Trash2 />
+                    </Button>
                   </span>
-                </span>
-                <span className="flex shrink-0 gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Editar ${o.id}`}
-                    onClick={() => {
-                      setId(o.id);
-                      setSiteId(o.siteId);
-                      setLines(o.lines.map((l) => ({ ...l })));
-                      setDetails({
-                        customerName: o.customerName ?? '',
-                        deliveryDate: o.deliveryDate ?? '',
-                        notes: o.notes ?? '',
-                      });
-                    }}
-                  >
-                    <Pencil />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Quitar ${o.id}`}
-                    disabled={busy}
-                    onClick={() =>
-                      window.confirm(`¿Quitar el pedido ${o.id}?`) &&
-                      void change(() => api.removeOrder(o.id))
-                    }
-                  >
-                    <Trash2 />
-                  </Button>
-                </span>
+                </div>
+                {history === o.id && (
+                  <div className="border-t pt-3">
+                    <OrderTimeline orderId={o.id} track={tracks.get(o.id) ?? null} />
+                  </div>
+                )}
               </li>
             ))}
           </ul>
@@ -545,20 +584,67 @@ function formatDate(iso: string): string {
   return `${day}-${month}-${year}`;
 }
 
-/** Estado de cada pedido (en ruta, entregado…); se refresca junto con los datos. */
-function useOrderTracks(data: MasterDataView): Map<string, OrderTrack> {
+/**
+ * Estado e historial de cada pedido, y su camión en el plan publicado; se refresca junto
+ * con los datos.
+ */
+function useOrderTracks(data: MasterDataView) {
   const [tracks, setTracks] = useState<Map<string, OrderTrack>>(new Map());
+  const [planned, setPlanned] = useState<Map<string, { plate: string; position: number }>>(
+    new Map(),
+  );
   useEffect(() => {
     let active = true;
     api.orderTracks().then(
       (list) => active && setTracks(new Map(list.map((t) => [t.orderId, t]))),
       () => undefined,
     );
+    api.activePlan().then(
+      (plan) =>
+        active &&
+        setPlanned(
+          new Map(
+            (plan?.routes ?? []).flatMap((r) =>
+              r.stops.map((stop, i) => [stop.deliveryId, { plate: r.unitPlate, position: i + 1 }]),
+            ),
+          ),
+        ),
+      () => undefined,
+    );
     return () => {
       active = false;
     };
   }, [data]);
-  return tracks;
+  return { tracks, planned };
+}
+
+/** Qué camión lleva qué: pedidos cargados o en ruta, por patente. */
+function TrucksSummary({ tracks }: { tracks: Map<string, OrderTrack> }) {
+  const byTruck = new Map<string, string[]>();
+  for (const track of tracks.values()) {
+    if ((track.status !== 'CARGADO' && track.status !== 'EN_RUTA') || !track.vehiclePlate) {
+      continue;
+    }
+    byTruck.set(track.vehiclePlate, [...(byTruck.get(track.vehiclePlate) ?? []), track.orderId]);
+  }
+  if (byTruck.size === 0) return null;
+  return (
+    <div className="grid gap-1 rounded-lg bg-muted px-3 py-2" aria-label="Pedidos por camión">
+      <p className="flex items-center gap-2 font-medium">
+        <Truck className="size-4" aria-hidden /> En camiones
+      </p>
+      {[...byTruck.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([plate, orders]) => (
+          <p key={plate}>
+            <span className="font-medium">{plate}</span>:{' '}
+            {orders
+              .map((id) => `${id} (${ORDER_STATUS_LABEL[tracks.get(id)!.status]})`)
+              .join(' · ')}
+          </p>
+        ))}
+    </div>
+  );
 }
 
 function OrderStatusLabel({ track }: { track: OrderTrack | null }) {

@@ -31,6 +31,10 @@
   --series-1: #2a78d6;
   --series-2: #eb6834;
   --series-3: #1baf7a;
+  /* Etiquetas con código de barras: negro sobre blanco en ambos temas (las pistolas no
+     leen códigos invertidos). */
+  --label-paper: #ffffff;
+  --label-ink: #000000;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -104,6 +108,8 @@
   --color-status-good: var(--status-good);
   --color-status-warning: var(--status-warning);
   --color-status-critical: var(--status-critical);
+  --color-label-paper: var(--label-paper);
+  --color-label-ink: var(--label-ink);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -343,5 +349,9 @@
   }
   .print-area .no-print {
     display: none;
+  }
+  .order-label {
+    break-inside: avoid;
+    border-color: var(--label-ink);
   }
 }

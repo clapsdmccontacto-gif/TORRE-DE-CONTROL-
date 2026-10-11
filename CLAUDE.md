@@ -11,9 +11,11 @@ secretos (la única clave es la de TomTom de la empresa, ver abajo).
 - `domain/` es TypeScript puro: sin NestJS, sin base de datos, sin enums ni
   "parameter properties". El frontend compila ese mismo código (alias `@core`, con
   `erasableSyntaxOnly`) para ejecutar las reglas en el navegador.
-- `application/` de `routing` y `tracking` son clases sin framework (`RoutePlanner`,
-  `TrackingHub`): el backend las registra como providers con `useFactory` y el modo local
-  del frontend las instancia igual. Ahí no va NestJS ni APIs exclusivas de Node.
+- `application/` de `routing`, `tracking`, `fulfillment`, `epod`, `picking` y `dispatch` son
+  clases sin framework (`RoutePlanner`, `TrackingHub`, `OrderTracker`, `DeliveryRegistry`,
+  `PickingDesk`, `DispatchDesk`): el backend las registra como providers con `useFactory` y
+  el modo local del frontend las instancia igual (`src/lib/local-api.ts`). Ahí no va NestJS
+  ni APIs exclusivas de Node.
 - Regla nueva: función pura en `domain/` con su `*.spec.ts` al lado; endpoint con esquema
   Zod en `http/`; en el frontend, agregar la operación a `TorreApi` (`src/types/api.ts`) e
   implementarla en `src/lib/api.ts` (HTTP) y en `src/lib/local-api.ts` (modo local).
@@ -46,6 +48,12 @@ secretos (la única clave es la de TomTom de la empresa, ver abajo).
   `picking/domain/pick-task.ts`; cada lectura es un evento idempotente en `ops_records`
   (`picking`); monitor en vivo por SSE (`/picking/stream`). La cámara usa `BarcodeDetector`
   y, si no existe, `@zxing/browser` (import dinámico).
+- Despacho: `DispatchDesk` (`dispatch/application/`, sin framework) con reglas puras en
+  `dispatch/domain/dispatch.ts` (orden de carga, validación de lecturas, cierre con
+  faltantes) y etiquetas Code128 (`dispatch/domain/code128.ts`, dibujadas como SVG en
+  `src/features/dispatch/OrderLabel.tsx`, negro sobre blanco con los tokens `label-*`). Los
+  pedidos asignados a mano llegan a la ruta del conductor por `extraStops` /
+  `syncExtraStops` de `TrackingHub`. Historial por pedido: `src/features/fulfillment/OrderTimeline.tsx`.
 - Enlaces de conductor y de bodega (`app=conductor` / `app=bodega`): el equipo queda sólo en
   esa app (`src/lib/app-mode.ts`).
 - Sin datos de muestra ni simulación: la app parte vacía y la empresa carga bodega,

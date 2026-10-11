@@ -135,6 +135,12 @@ function httpApi(baseUrl: string): TorreApi {
     undoPick: (orderId, input) => post(`/picking/orders/${id(orderId)}/undo`, input),
     closePick: (orderId, input) => post(`/picking/orders/${id(orderId)}/close`, input),
     pickingMonitor: () => request('/picking/monitor'),
+    dispatchTrucks: () => request('/dispatch/trucks'),
+    dispatchTruck: (plate) => request(`/dispatch/trucks/${id(plate)}`),
+    assignToTruck: (plate, input) => post(`/dispatch/trucks/${id(plate)}/assign`, input),
+    scanLoad: (plate, input) => post(`/dispatch/trucks/${id(plate)}/scans`, input),
+    undoLoad: (plate, input) => post(`/dispatch/trucks/${id(plate)}/undo`, input),
+    closeLoad: (plate, input) => post(`/dispatch/trucks/${id(plate)}/close`, input),
     subscribePicking: (onSnapshot, onError) =>
       subscribeStream<PickMonitor>(`${baseUrl}/picking/stream`, onSnapshot, onError),
     deviceTrack: (sessionId) =>
