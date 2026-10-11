@@ -4,8 +4,10 @@ import {
   CircleCheck,
   LoaderCircle,
   MapPin,
+  MapPinOff,
   MapPinned,
   Phone,
+  Route as RouteIcon,
   Truck,
   X,
   type LucideIcon,
@@ -52,7 +54,9 @@ import { DeviceStatusLabel } from './device-status';
 const EVENT_ICON: Record<TrackingEvent['type'], LucideIcon> = {
   AVISO_PROXIMIDAD: Bell,
   LLEGADA_OBRA: MapPin,
-  SALIDA_OBRA: CircleCheck,
+  SALIDA_OBRA: MapPinOff,
+  ENTREGA_REGISTRADA: CircleCheck,
+  RUTA_ASIGNADA: RouteIcon,
   INICIO_RUTA: Truck,
   FIN_RUTA: Truck,
 };

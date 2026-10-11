@@ -25,6 +25,15 @@ secretos (la única clave es la de TomTom de la empresa, ver abajo).
   (`COMPANY_TOMTOM_KEY` en `routing/infrastructure/tomtom.ts`, clave de navegador incluida
   a pedido del dueño; `VITE_TOMTOM_KEY` la reemplaza al compilar y vacía la quita).
   Ningún otro secreto en el repositorio.
+- Operación guardada (módulo `storage`): planes de ruta (y el publicado), rutas de
+  conductores con el avance de sus paradas y eventos recientes, como registros JSON por
+  colección en `ops_records` (migración 005) vía el puerto `RecordStore`
+  (`common/record-store.ts`, sin framework: `RoutePlanner` y `TrackingHub` lo reciben como
+  `store`; en modo local, localStorage). Cada caso de uso escribe con una `WriteQueue` y los
+  controladores esperan `flush()` antes de responder. La geocerca sólo sugiere la llegada:
+  la entrega la registra el conductor (`completeStop`).
+- Enlaces de conductor con `app=conductor`: el teléfono queda sólo en el modo conductor
+  (`src/lib/app-mode.ts`).
 - Sin datos de muestra ni simulación: la app parte vacía y la empresa carga bodega,
   camiones, productos, obras y pedidos (módulo `master-data`, un documento JSON en
   PostgreSQL `app_state` vía `DATABASE_URL`, o en memoria; en modo local, localStorage).

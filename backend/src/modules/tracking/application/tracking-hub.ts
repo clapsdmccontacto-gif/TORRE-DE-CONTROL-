@@ -2,13 +2,16 @@ import { DomainError } from '../../../common/domain-error.js';
 import type { LatLng } from '../../../common/geo.js';
 import { newId } from '../../../common/ids.js';
 import { roundTo } from '../../../common/math.js';
+import { WriteQueue, type RecordStore } from '../../../common/record-store.js';
 import type { FleetUnit, PlannedRoute } from '../../routing/domain/optimizer.js';
 import type { RoutePlan } from '../../routing/application/route-planner.js';
 import {
   DEFAULT_TRACKING_POLICY,
+  completeStop,
   deviceStatus,
   effectiveSpeedKmh,
   evaluateFix,
+  nextStopEta,
   progressStops,
   summarizeTrack,
   type DeviceStatus,
@@ -77,7 +80,7 @@ export interface TrackingEvent {
   at: string;
   sessionId: string;
   vehiclePlate: string;
-  type: TrackingEventType | 'INICIO_RUTA' | 'FIN_RUTA';
+  type: TrackingEventType | 'INICIO_RUTA' | 'FIN_RUTA' | 'RUTA_ASIGNADA';
   siteName: string | null;
   message: string;
 }
@@ -97,38 +100,77 @@ export interface TrackingHubDeps {
   /** Camiones registrados por la empresa. */
   units: () => readonly FleetUnit[];
   activePlan: () => RoutePlan | null;
+  /** Dónde se guardan las rutas y su avance para retomarlas tras un reinicio del servidor. */
+  store?: RecordStore;
   now?: () => number;
   policy?: TrackingPolicy;
 }
 
+type StopCargo = { cargo: CargoLine[]; weightKg: number };
+
 interface SessionState {
   session: DriverSession;
   stops: TrackedStop[];
-  stopCargo: Map<string, { cargo: CargoLine[]; weightKg: number }>;
+  stopCargo: Map<string, StopCargo>;
   fixes: PositionFix[];
   speedKmh: number | null;
   nextStopEtaMin: number | null;
+  /** Último guardado (las lecturas GPS se guardan cada cierto tiempo, no una por una). */
+  savedAt: number;
+  dirty: boolean;
+}
+
+/** Lo que se guarda de cada ruta (la ETA se recalcula al cargar). */
+interface StoredSession {
+  session: DriverSession;
+  stops: TrackedStop[];
+  stopCargo: [string, StopCargo][];
+  fixes: PositionFix[];
+  speedKmh: number | null;
 }
 
 const MAX_TRACK_POINTS = 5_000;
+const MAX_STORED_POINTS = 1_000;
 const MAX_EVENTS = 200;
 const SNAPSHOT_EVENTS = 30;
+/** Las lecturas GPS sin cambios de parada se guardan a lo más cada 15 s por ruta. */
+const SAVE_EVERY_MS = 15_000;
+/** Una ruta sin lecturas por 12 h se cierra sola (el teléfono se apagó sin terminarla). */
+const STALE_AFTER_MS = 12 * 3_600_000;
+/** Las rutas terminadas se conservan 2 días (trayecto en el mapa) y después se borran. */
+const KEEP_ENDED_MS = 48 * 3_600_000;
+const SESSIONS = 'driver-sessions';
+const TRACKING = 'tracking';
+const EVENTS = 'events';
 
 /**
  * Caso de uso "rastrear la flota": sesiones de conductores, lecturas GPS, avance de
- * paradas y eventos (aviso al capataz, llegada, salida). Estado en memoria; sin
- * dependencias de framework, de modo que lo usan el backend y el modo local del frontend.
+ * paradas y eventos (aviso al capataz, llegada, entrega). Sin dependencias de framework,
+ * de modo que lo usan el backend y el modo local del frontend. Con `store`, las rutas y su
+ * avance sobreviven a un reinicio: el teléfono sigue enviando a la misma ruta.
  */
 export class TrackingHub {
+  /** Rutas guardadas ya cargadas. */
+  readonly ready: Promise<void>;
   private readonly deps: TrackingHubDeps;
   private readonly policy: TrackingPolicy;
   private readonly sessions = new Map<string, SessionState>();
   private events: TrackingEvent[] = [];
   private readonly listeners = new Set<(snapshot: FleetSnapshot) => void>();
+  private readonly writes = new WriteQueue();
 
   constructor(deps: TrackingHubDeps) {
     this.deps = deps;
     this.policy = deps.policy ?? DEFAULT_TRACKING_POLICY;
+    this.ready = this.restore();
+  }
+
+  /** Guarda lo pendiente (lecturas GPS acumuladas) y espera a que termine. */
+  flush(): Promise<void> {
+    for (const state of this.sessions.values()) {
+      if (state.dirty) this.saveSession(state);
+    }
+    return this.writes.flush();
   }
 
   /** Inicia la ruta de un conductor. Reemplaza otra sesión activa del mismo vehículo. */
@@ -148,10 +190,13 @@ export class TrackingHub {
     for (const state of this.sessions.values()) {
       if (state.session.vehiclePlate === unit.plate && !state.session.endedAt) {
         this.end(state, 'Otro dispositivo tomó el vehículo.');
+        this.saveSession(state);
       }
     }
+    this.pruneEnded();
     const route = this.deps.activePlan()?.routes.find((r) => r.unitPlate === unit.plate) ?? null;
     const state = this.createState(driverName, driverPhone, unit, route);
+    this.saveSession(state);
     this.notify();
     return state.session;
   }
@@ -159,6 +204,7 @@ export class TrackingHub {
   endSession(sessionId: string): DriverSession {
     const state = this.activeState(sessionId);
     this.end(state, null);
+    this.saveSession(state);
     this.notify();
     return state.session;
   }
@@ -166,9 +212,87 @@ export class TrackingHub {
   /** Recibe lecturas del teléfono (en lote: el teléfono las acumula si pierde señal). */
   ingest(sessionId: string, fixes: readonly PositionFix[]): IngestResult {
     const state = this.activeState(sessionId);
+    const before = state.stops.map((s) => s.state).join();
     const result = this.apply(state, fixes);
+    const stopsChanged = state.stops.map((s) => s.state).join() !== before;
+    if (result.accepted > 0) state.dirty = true;
+    if (stopsChanged || (state.dirty && this.now() - state.savedAt >= SAVE_EVERY_MS)) {
+      this.saveSession(state);
+    }
     this.notify();
     return result;
+  }
+
+  /** El conductor registró la entrega del pedido en la obra. */
+  completeStop(sessionId: string, deliveryId: string): DriverSession {
+    const state = this.activeState(sessionId);
+    const { stops, event } = completeStop(state.stops, deliveryId);
+    state.stops = stops;
+    if (event) {
+      const message = `${state.session.driverName} registró la entrega en ${event.siteName} (${state.session.vehiclePlate}).`;
+      this.record(state, event.type, event.siteName, message, new Date(this.now()).toISOString());
+    }
+    state.nextStopEtaMin = nextStopEta(
+      state.stops,
+      state.fixes.at(-1) ?? null,
+      state.speedKmh,
+      this.policy,
+    );
+    state.session.stops = this.liveStops(state);
+    this.saveSession(state);
+    this.notify();
+    return state.session;
+  }
+
+  /**
+   * Se publicó un plan: las rutas en curso reciben sus paradas (sin perder lo ya entregado),
+   * así el conductor que inició antes de la publicación las ve sin reiniciar.
+   */
+  planPublished(plan: RoutePlan): void {
+    let changed = false;
+    for (const state of this.sessions.values()) {
+      if (state.session.endedAt) continue;
+      const route = plan.routes.find((r) => r.unitPlate === state.session.vehiclePlate) ?? null;
+      const previous = new Map(state.stops.map((s) => [s.deliveryId, s]));
+      const planned = (route?.stops ?? []).map(
+        (s): TrackedStop => ({
+          deliveryId: s.deliveryId,
+          siteName: s.siteName,
+          location: s.location,
+          notifyEtaMinutes: s.notifyEtaMinutes,
+          state: previous.get(s.deliveryId)?.state ?? 'PENDIENTE',
+          proximityNotified: previous.get(s.deliveryId)?.proximityNotified ?? false,
+        }),
+      );
+      const plannedIds = new Set(planned.map((s) => s.deliveryId));
+      const delivered = state.stops.filter(
+        (s) => s.state === 'COMPLETADA' && !plannedIds.has(s.deliveryId),
+      );
+      const stops = [...delivered, ...planned];
+      if (JSON.stringify(stops) === JSON.stringify(state.stops)) continue;
+      state.stops = stops;
+      for (const s of route?.stops ?? []) {
+        state.stopCargo.set(s.deliveryId, { cargo: s.lines, weightKg: s.weightKg });
+      }
+      state.nextStopEtaMin = nextStopEta(
+        stops,
+        state.fixes.at(-1) ?? null,
+        state.speedKmh,
+        this.policy,
+      );
+      state.session.stops = this.liveStops(state);
+      const pending = planned.filter((s) => s.state !== 'COMPLETADA').length;
+      this.record(
+        state,
+        'RUTA_ASIGNADA',
+        null,
+        `${state.session.vehiclePlate} recibió su ruta: ${pending} ${pending === 1 ? 'parada pendiente' : 'paradas pendientes'}.`,
+        new Date(this.now()).toISOString(),
+      );
+      this.saveSession(state);
+      changed = true;
+    }
+    if (changed) this.notify();
   }
 
   track(sessionId: string): { fixes: PositionFix[]; summary: ReturnType<typeof summarizeTrack> } {
@@ -234,6 +358,8 @@ export class TrackingHub {
       fixes: [],
       speedKmh: null,
       nextStopEtaMin: null,
+      savedAt: 0,
+      dirty: false,
     };
     session.stops = this.liveStops(state);
     this.sessions.set(session.id, state);
@@ -271,7 +397,7 @@ export class TrackingHub {
             ? `${plate} a ~${Math.round(event.etaMinutes ?? 0)} min de ${event.siteName}: avisar al capataz.`
             : event.type === 'LLEGADA_OBRA'
               ? `${plate} llegó a ${event.siteName}.`
-              : `${plate} salió de ${event.siteName}: descarga terminada.`;
+              : `${plate} salió de ${event.siteName} sin registrar la entrega.`;
         this.record(state, event.type, event.siteName, message, fix.recordedAt);
       }
     }
@@ -353,6 +479,74 @@ export class TrackingHub {
     });
     this.events.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
     if (this.events.length > MAX_EVENTS) this.events.splice(0, this.events.length - MAX_EVENTS);
+    const store = this.deps.store;
+    if (store) {
+      const events = [...this.events];
+      this.writes.enqueue(() => store.put(TRACKING, EVENTS, events));
+    }
+  }
+
+  private saveSession(state: SessionState): void {
+    state.savedAt = this.now();
+    state.dirty = false;
+    const store = this.deps.store;
+    if (!store) return;
+    const stored: StoredSession = {
+      session: structuredClone(state.session),
+      stops: state.stops.map((s) => ({ ...s })),
+      stopCargo: [...state.stopCargo],
+      fixes: state.fixes.slice(-MAX_STORED_POINTS),
+      speedKmh: state.speedKmh,
+    };
+    this.writes.enqueue(() => store.put(SESSIONS, state.session.id, stored));
+  }
+
+  /** Borra las rutas terminadas hace más de 2 días. */
+  private pruneEnded(): void {
+    const limit = this.now() - KEEP_ENDED_MS;
+    for (const [id, state] of this.sessions) {
+      const endedAt = state.session.endedAt ? Date.parse(state.session.endedAt) : null;
+      if (endedAt === null || endedAt > limit) continue;
+      this.sessions.delete(id);
+      const store = this.deps.store;
+      if (store) this.writes.enqueue(() => store.remove(SESSIONS, id));
+    }
+  }
+
+  private async restore(): Promise<void> {
+    const store = this.deps.store;
+    if (!store) return;
+    const [sessions, tracking] = await Promise.all([store.list(SESSIONS), store.list(TRACKING)]);
+    const events = tracking.find((r) => r.id === EVENTS)?.value;
+    if (Array.isArray(events)) this.events = events as TrackingEvent[];
+    for (const record of sessions) {
+      const stored = record.value as StoredSession | null;
+      if (!stored?.session?.id || !Array.isArray(stored.stops)) continue;
+      const fixes = Array.isArray(stored.fixes) ? stored.fixes : [];
+      const state: SessionState = {
+        session: stored.session,
+        stops: stored.stops,
+        stopCargo: new Map(stored.stopCargo ?? []),
+        fixes,
+        speedKmh: stored.speedKmh ?? null,
+        nextStopEtaMin: nextStopEta(
+          stored.stops,
+          fixes.at(-1) ?? null,
+          stored.speedKmh ?? null,
+          this.policy,
+        ),
+        savedAt: this.now(),
+        dirty: false,
+      };
+      state.session.stops = this.liveStops(state);
+      this.sessions.set(state.session.id, state);
+      const lastSeen = Date.parse(fixes.at(-1)?.recordedAt ?? state.session.startedAt);
+      if (!state.session.endedAt && this.now() - lastSeen > STALE_AFTER_MS) {
+        this.end(state, 'Se cerró sola tras 12 horas sin señal.');
+        this.saveSession(state);
+      }
+    }
+    this.pruneEnded();
   }
 
   private activeState(sessionId: string): SessionState {

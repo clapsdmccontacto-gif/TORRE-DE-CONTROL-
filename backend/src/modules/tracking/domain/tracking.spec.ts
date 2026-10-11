@@ -1,7 +1,9 @@
 import {
+  completeStop,
   deviceStatus,
   etaMinutes,
   evaluateFix,
+  nextStopEta,
   progressStops,
   summarizeTrack,
   type PositionFix,
@@ -107,7 +109,7 @@ describe('progressStops', () => {
     },
   ];
 
-  it('avisa al capataz una sola vez, marca llegada y salida, y pasa a la siguiente obra', () => {
+  it('avisa al capataz una sola vez y al llegar sólo sugiere «Llegó a la obra»', () => {
     // A ~22 km: sin aviso todavía.
     let progress = progressStops(stops, { lat: -37.3, lng: -72.3 }, 45);
     expect(progress.events).toEqual([]);
@@ -124,11 +126,37 @@ describe('progressStops', () => {
     progress = progressStops(progress.stops, { lat: -37.5005, lng: -72.3 }, 2);
     expect(progress.events.map((e) => e.type)).toEqual(['LLEGADA_OBRA']);
     expect(progress.stops[0].state).toBe('EN_OBRA');
+    expect(progress.nextStopEtaMin).toBe(0);
 
-    // Sale de la obra: queda completada y la ETA apunta a la siguiente.
+    // A 200 m (ruido del GPS, dentro del margen): sigue en la obra.
+    progress = progressStops(progress.stops, { lat: -37.5018, lng: -72.3 }, 0);
+    expect(progress.events).toEqual([]);
+    expect(progress.stops[0].state).toBe('EN_OBRA');
+  });
+
+  it('no marca la entrega al salir: vuelve a pendiente hasta que el conductor la registra', () => {
+    let progress = progressStops(stops, { lat: -37.5005, lng: -72.3 }, 2);
     progress = progressStops(progress.stops, { lat: -37.51, lng: -72.3 }, 40);
     expect(progress.events.map((e) => e.type)).toEqual(['SALIDA_OBRA']);
-    expect(progress.stops.map((s) => s.state)).toEqual(['COMPLETADA', 'PENDIENTE']);
-    expect(progress.nextStopEtaMin).toBeGreaterThan(15);
+    expect(progress.stops.map((s) => s.state)).toEqual(['PENDIENTE', 'PENDIENTE']);
+    expect(progress.nextStopEtaMin).toBeLessThan(5); // Sigue apuntando a la obra 1.
+
+    const done = completeStop(progress.stops, 'NV-1');
+    expect(done.event).toMatchObject({ type: 'ENTREGA_REGISTRADA', siteName: 'Obra 1' });
+    expect(done.stops.map((s) => s.state)).toEqual(['COMPLETADA', 'PENDIENTE']);
+    expect(nextStopEta(done.stops, { lat: -37.51, lng: -72.3 }, 40)).toBeGreaterThan(15);
+    expect(completeStop(done.stops, 'NV-1').event).toBeNull();
+    expect(() => completeStop(done.stops, 'NV-9')).toThrow(
+      expect.objectContaining({ code: 'PARADA_DESCONOCIDA' }),
+    );
+  });
+
+  it('detecta la llegada a cualquier obra pendiente, aunque no sea la siguiente', () => {
+    const progress = progressStops(stops, { lat: -37.6004, lng: -72.3 }, 3);
+    expect(progress.stops.map((s) => s.state)).toEqual(['PENDIENTE', 'EN_OBRA']);
+    expect(progress.events.map((e) => [e.type, e.deliveryId])).toEqual([
+      ['LLEGADA_OBRA', 'NV-2'],
+    ]);
+    expect(progress.nextStopEtaMin).toBe(0);
   });
 });

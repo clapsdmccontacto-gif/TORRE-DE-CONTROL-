@@ -1,5 +1,13 @@
 import { navigationLinks } from '@core/modules/routing/domain/road-route';
-import { ExternalLink, LoaderCircle, LocateFixed, Navigation, Square } from 'lucide-react';
+import { targetStop } from '@core/modules/tracking/domain/tracking';
+import {
+  CircleCheck,
+  ExternalLink,
+  LoaderCircle,
+  LocateFixed,
+  Navigation,
+  Square,
+} from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusBanner, StatusLabel } from '@/components/status';
 import { Button, LinkButton } from '@/components/ui/button';
@@ -8,7 +16,14 @@ import { Input, NativeSelect } from '@/components/ui/input';
 import { api, apiMode, errorMessage } from '@/lib/api';
 import { ApiError } from '@/lib/api-error';
 import { STOP_STATE_LABEL, formatKg } from '@/lib/format';
-import type { DriverSession, FleetUnitView, LiveDevice, PositionFix } from '@/types/api';
+import type {
+  DriverSession,
+  FleetUnitView,
+  LiveDevice,
+  LiveStop,
+  PositionFix,
+} from '@/types/api';
+import { useWakeLock, type WakeLockState } from './use-wake-lock';
 
 const STORAGE_KEY = 'torre-control.driver-session';
 /** Nombre, teléfono y camión del conductor: quedan en su teléfono para la próxima vez. */
@@ -109,7 +124,9 @@ export function DriverPage() {
   const [pending, setPending] = useState(0);
   const [device, setDevice] = useState<LiveDevice | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [completing, setCompleting] = useState<string | null>(null);
   const queueRef = useRef<PositionFix[]>([]);
+  const wakeLock = useWakeLock(session !== null);
 
   useEffect(() => {
     let active = true;
@@ -208,24 +225,6 @@ export function DriverPage() {
     };
   }, [session, flush]);
 
-  // Pantalla encendida mientras se conduce (si el navegador lo permite).
-  useEffect(() => {
-    if (!session || !('wakeLock' in navigator)) return;
-    let lock: WakeLockSentinel | null = null;
-    const acquire = () =>
-      navigator.wakeLock
-        .request('screen')
-        .then((l) => (lock = l))
-        .catch(() => undefined);
-    void acquire();
-    const onVisible = () => document.visibilityState === 'visible' && void acquire();
-    document.addEventListener('visibilitychange', onVisible);
-    return () => {
-      document.removeEventListener('visibilitychange', onVisible);
-      void lock?.release();
-    };
-  }, [session]);
-
   // Estado de la ruta (próxima obra, ETA, carga) desde la flota en vivo.
   useEffect(() => {
     if (!session) return;
@@ -265,6 +264,23 @@ export function DriverPage() {
     }
   }
 
+  /** El conductor registra la entrega de un pedido (la geocerca sólo sugiere la llegada). */
+  async function completeStop(stop: LiveStop) {
+    if (!session) return;
+    setError(null);
+    setCompleting(stop.deliveryId);
+    try {
+      await flush();
+      const updated = await api.completeStop(session.id, stop.deliveryId);
+      // Se muestra de inmediato; la flota en vivo trae después la carga y la ETA al día.
+      setDevice((current) => (current ? { ...current, stops: updated.stops } : current));
+    } catch (e) {
+      setError(`No se pudo registrar la entrega en ${stop.siteName}: ${errorMessage(e)}`);
+    } finally {
+      setCompleting(null);
+    }
+  }
+
   async function finish() {
     if (!session) return;
     await flush();
@@ -275,6 +291,8 @@ export function DriverPage() {
     }
     stopRoute(null);
   }
+
+  const target = device ? targetStop(device.stops) : null;
 
   return (
     <div className="mx-auto grid w-full max-w-lg grid-cols-1 gap-4">
@@ -369,6 +387,7 @@ export function DriverPage() {
             </CardHeader>
             <CardContent className="grid grid-cols-1 gap-3 text-sm">
               <GpsStatus gps={gps} now={now} blockedReason={gpsUnavailableReason()} />
+              <WakeLockStatus state={wakeLock} />
               <p className="text-muted-foreground tabular-nums">
                 Enviadas: {sent.accepted} · Pendientes por enviar: {pending}
                 {sent.lastRejection &&
@@ -381,21 +400,48 @@ export function DriverPage() {
             </CardContent>
           </Card>
 
-          {device?.nextStop && (
+          {device && device.stops.length === 0 && (
+            <StatusBanner status="warning" title="Su camión no tiene pedidos asignados">
+              La ruta y el GPS ya están activos. Pida a la torre de control que publique el plan de
+              rutas («Optimizar rutas» → «Publicar a la flota»): los pedidos aparecen aquí solos, sin
+              reiniciar la ruta.
+            </StatusBanner>
+          )}
+
+          {device && device.stops.length > 0 && !target && (
+            <StatusBanner status="good" title="Entregó todos los pedidos">
+              Al volver a la bodega toque «Terminar ruta».
+            </StatusBanner>
+          )}
+
+          {device && target && (
             <Card>
               <CardHeader>
-                <CardDescription>Próxima obra</CardDescription>
-                <CardTitle className="text-xl">{device.nextStop.siteName}</CardTitle>
+                <CardDescription>
+                  {target.state === 'EN_OBRA' ? 'Está en la obra' : 'Próxima obra'}
+                </CardDescription>
+                <CardTitle className="text-xl">{target.siteName}</CardTitle>
               </CardHeader>
               <CardContent className="grid grid-cols-1 gap-3 text-sm">
-                <p className="text-muted-foreground">
-                  {device.nextStop.etaMin === 0
-                    ? 'En la obra. Al salir se marca la descarga como terminada.'
-                    : device.nextStop.etaMin !== null
-                      ? `Llegada estimada en ${device.nextStop.etaMin} min. Se avisa al capataz 15 min antes.`
-                      : 'Esperando la primera lectura del GPS para estimar la llegada.'}
-                </p>
-                <NavigateButtons device={device} />
+                {target.state === 'EN_OBRA' ? (
+                  <StatusLabel status="good">
+                    Llegó a la obra. Cuando termine de descargar, registre la entrega.
+                  </StatusLabel>
+                ) : (
+                  <p className="text-muted-foreground">
+                    {device.nextStop?.siteName === target.siteName &&
+                    device.nextStop.etaMin != null
+                      ? `Llegada estimada en ${device.nextStop.etaMin} min. Se avisa al capataz antes de llegar.`
+                      : 'Calculando la hora de llegada con el GPS…'}
+                  </p>
+                )}
+                <DeliverButton
+                  stop={target}
+                  busy={completing === target.deliveryId}
+                  primary={target.state === 'EN_OBRA'}
+                  onConfirm={() => void completeStop(target)}
+                />
+                <NavigateButtons stop={target} />
               </CardContent>
             </Card>
           )}
@@ -408,14 +454,18 @@ export function DriverPage() {
               </CardHeader>
               <CardContent className="grid grid-cols-1 gap-3 text-sm">
                 {device.stops.map((stop, i) => (
-                  <div key={stop.deliveryId} className="grid gap-1 rounded-lg border p-3">
+                  <div key={stop.deliveryId} className="grid gap-2 rounded-lg border p-3">
                     <p className="flex justify-between gap-2 font-medium">
                       <span className="min-w-0">
                         {i + 1}. {stop.siteName}
                       </span>
-                      <span className="shrink-0 text-muted-foreground">
-                        {STOP_STATE_LABEL[stop.state]}
-                      </span>
+                      {stop.state === 'COMPLETADA' ? (
+                        <StatusLabel status="good">{STOP_STATE_LABEL[stop.state]}</StatusLabel>
+                      ) : (
+                        <span className="shrink-0 text-muted-foreground">
+                          {STOP_STATE_LABEL[stop.state]}
+                        </span>
+                      )}
                     </p>
                     <ul className="text-muted-foreground">
                       {stop.cargo.map((line) => (
@@ -424,6 +474,14 @@ export function DriverPage() {
                         </li>
                       ))}
                     </ul>
+                    {stop.state !== 'COMPLETADA' && stop !== target && (
+                      <DeliverButton
+                        stop={stop}
+                        busy={completing === stop.deliveryId}
+                        primary={false}
+                        onConfirm={() => void completeStop(stop)}
+                      />
+                    )}
                   </div>
                 ))}
               </CardContent>
@@ -465,10 +523,8 @@ function GpsStatus({
  * Navegación por voz a la próxima obra con la app del teléfono. Al volver a esta pestaña
  * el GPS sigue enviando; mientras Waze o Maps estén al frente, el navegador puede pausarlo.
  */
-function NavigateButtons({ device }: { device: LiveDevice }) {
-  const next = device.stops.find((s) => s.state !== 'COMPLETADA');
-  if (!next) return null;
-  const links = navigationLinks(next.location);
+function NavigateButtons({ stop }: { stop: LiveStop }) {
+  const links = navigationLinks(stop.location);
   return (
     <div className="grid gap-2">
       <div className="flex flex-wrap gap-2">
@@ -484,5 +540,66 @@ function NavigateButtons({ device }: { device: LiveDevice }) {
         pantalla al llegar a la obra.
       </p>
     </div>
+  );
+}
+
+function WakeLockStatus({ state }: { state: WakeLockState }) {
+  if (state === 'on') {
+    return <StatusLabel status="good">Pantalla encendida mientras dure la ruta</StatusLabel>;
+  }
+  if (state === 'idle') return null;
+  return (
+    <StatusLabel status="warning">
+      {state === 'unsupported'
+        ? 'Este navegador no puede mantener la pantalla encendida: deje el bloqueo automático del teléfono en «Nunca» durante la ruta.'
+        : 'La pantalla puede apagarse sola: toque la pantalla de vez en cuando o deje el bloqueo automático en «Nunca».'}
+    </StatusLabel>
+  );
+}
+
+/** Registrar la entrega pide confirmar (evita marcarla con un toque accidental). */
+function DeliverButton({
+  stop,
+  busy,
+  primary,
+  onConfirm,
+}: {
+  stop: LiveStop;
+  busy: boolean;
+  primary: boolean;
+  onConfirm: () => void;
+}) {
+  const [asking, setAsking] = useState(false);
+  if (asking) {
+    return (
+      <div className="grid gap-2 rounded-md border p-3">
+        <p className="font-medium">¿Confirma que entregó el pedido en {stop.siteName}?</p>
+        <div className="grid grid-cols-2 gap-2">
+          <Button
+            className="h-11"
+            disabled={busy}
+            onClick={() => {
+              setAsking(false);
+              onConfirm();
+            }}
+          >
+            <CircleCheck /> Sí, entregado
+          </Button>
+          <Button variant="outline" className="h-11" onClick={() => setAsking(false)}>
+            Cancelar
+          </Button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <Button
+      variant={primary ? 'default' : 'outline'}
+      className="h-11"
+      disabled={busy}
+      onClick={() => setAsking(true)}
+    >
+      {busy ? <LoaderCircle className="animate-spin" /> : <CircleCheck />} Registrar entrega
+    </Button>
   );
 }

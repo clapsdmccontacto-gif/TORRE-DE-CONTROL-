@@ -26,8 +26,10 @@ export class TrackingController {
   }
 
   @Post('sessions')
-  startSession(@Body(new ZodValidationPipe(startSessionSchema)) body: StartSessionRequest) {
-    return this.hub.startSession(body);
+  async startSession(@Body(new ZodValidationPipe(startSessionSchema)) body: StartSessionRequest) {
+    const session = this.hub.startSession(body);
+    await this.hub.flush();
+    return session;
   }
 
   @Post('sessions/:id/positions')
@@ -41,8 +43,19 @@ export class TrackingController {
 
   @Post('sessions/:id/end')
   @HttpCode(200)
-  endSession(@Param('id') id: string) {
-    return this.hub.endSession(id);
+  async endSession(@Param('id') id: string) {
+    const session = this.hub.endSession(id);
+    await this.hub.flush();
+    return session;
+  }
+
+  /** El conductor registró la entrega del pedido en la obra. */
+  @Post('sessions/:id/stops/:deliveryId/complete')
+  @HttpCode(200)
+  async completeStop(@Param('id') id: string, @Param('deliveryId') deliveryId: string) {
+    const session = this.hub.completeStop(id, deliveryId);
+    await this.hub.flush();
+    return session;
   }
 
   @Get('sessions/:id/track')

@@ -152,7 +152,7 @@ function VehiclesCard({
 
         <div className="grid gap-3 rounded-lg bg-muted px-3 py-2">
           <ShareLink
-            label="Enlace para los teléfonos de los conductores (abren, escriben su nombre y eligen el camión):"
+            label="Enlace para los teléfonos de los conductores (abre sólo el modo conductor: escriben su nombre y eligen el camión):"
             link={shareLink('conductor')}
           />
           {apiMode === 'http' && (

@@ -6,11 +6,13 @@ import { LoadPlanningModule } from './modules/load-planning/load-planning.module
 import { MasterDataModule } from './modules/master-data/master-data.module.js';
 import { PickingModule } from './modules/picking/picking.module.js';
 import { RoutingModule } from './modules/routing/routing.module.js';
+import { StorageModule } from './modules/storage/storage.module.js';
 import { TrackingModule } from './modules/tracking/tracking.module.js';
 
 @Module({
   imports: [
     CloudModule,
+    StorageModule,
     MasterDataModule,
     CatalogModule,
     PickingModule,

@@ -142,6 +142,28 @@ describe('Rastreo y rutas (e2e)', () => {
     expect(unknown.body.code).toBe('SESION_DESCONOCIDA');
   });
 
+  it('el conductor registra la entrega de un pedido de su ruta', async () => {
+    const server = app.getHttpServer();
+    const active = await request(server).get('/api/v1/routing/plans/active').expect(200);
+    const route = active.body.plan.routes.find((r: { stops: unknown[] }) => r.stops.length > 0);
+    const session = await request(server)
+      .post('/api/v1/tracking/sessions')
+      .send({ driverName: 'Pedro Soto', vehiclePlate: route.unitPlate })
+      .expect(201);
+    const first = route.stops[0].deliveryId;
+    const done = await request(server)
+      .post(`/api/v1/tracking/sessions/${session.body.id}/stops/${first}/complete`)
+      .expect(200);
+    expect(done.body.stops[0]).toMatchObject({ deliveryId: first, state: 'COMPLETADA' });
+    const live = await request(server).get('/api/v1/tracking/live').expect(200);
+    expect(live.body.events[0]).toMatchObject({ type: 'ENTREGA_REGISTRADA' });
+    const unknown = await request(server)
+      .post(`/api/v1/tracking/sessions/${session.body.id}/stops/NV-NO-EXISTE/complete`)
+      .expect(422);
+    expect(unknown.body.code).toBe('PARADA_DESCONOCIDA');
+    await request(server).post(`/api/v1/tracking/sessions/${session.body.id}/end`).expect(200);
+  });
+
   it('valida las lecturas GPS', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/v1/tracking/sessions/RUTA-x/positions')

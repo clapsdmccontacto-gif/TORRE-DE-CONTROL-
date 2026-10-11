@@ -2,14 +2,13 @@
 // (importadas desde backend/src con el alias @core). Así la app funciona sin servidor;
 // los datos quedan guardados sólo en este dispositivo (localStorage).
 import { DomainError } from '@core/common/domain-error';
+import type { RecordStore } from '@core/common/record-store';
 import { resolveLines } from '@core/modules/catalog/application/resolve-lines';
 import { unitVolumeM3 } from '@core/modules/catalog/domain/product';
 import { maxPayloadKg } from '@core/modules/load-planning/domain/vehicle';
 import { DEFAULT_FLEET } from '@core/modules/load-planning/infrastructure/default-fleet';
 import { MasterData } from '@core/modules/master-data/application/master-data';
 import type { StateStore } from '@core/modules/master-data/application/state-store.port';
-import { DEFAULT_CART_SPECS } from '@core/modules/picking/domain/cart';
-import { checkCartAddition } from '@core/modules/picking/domain/mix-validator';
 import { planLoad } from '@core/modules/load-planning/domain/cubicaje';
 import { RoutePlanner } from '@core/modules/routing/application/route-planner';
 import { TrackingHub } from '@core/modules/tracking/application/tracking-hub';
@@ -17,6 +16,7 @@ import { ApiError } from '@/lib/api-error';
 import type { TorreApi } from '@/types/api';
 
 export const LOCAL_DATA_KEY = 'torre-control.master-data';
+const LOCAL_RECORDS_PREFIX = 'torre-control.records.';
 
 /** Datos maestros en el navegador. */
 const localStore: StateStore = {
@@ -39,6 +39,39 @@ const localStore: StateStore = {
   },
 };
 
+/** Planes y rutas en el navegador: una entrada de localStorage por colección. */
+function readCollection(collection: string): Record<string, unknown> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LOCAL_RECORDS_PREFIX + collection) ?? '{}');
+    return raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeCollection(collection: string, records: Record<string, unknown>): void {
+  try {
+    localStorage.setItem(LOCAL_RECORDS_PREFIX + collection, JSON.stringify(records));
+  } catch {
+    throw new DomainError(
+      'SIN_ALMACENAMIENTO',
+      'El navegador no permite guardar datos (modo privado o almacenamiento lleno).',
+    );
+  }
+}
+
+const localRecords: RecordStore = {
+  list: async (collection) =>
+    Object.entries(readCollection(collection)).map(([id, value]) => ({ id, value })),
+  put: async (collection, id, value) =>
+    writeCollection(collection, { ...readCollection(collection), [id]: value }),
+  remove: async (collection, id) => {
+    const records = readCollection(collection);
+    delete records[id];
+    writeCollection(collection, records);
+  },
+};
+
 let localEngine: { data: MasterData; planner: RoutePlanner; hub: TrackingHub } | null = null;
 
 function engine() {
@@ -49,19 +82,22 @@ function engine() {
     orders: () => data.orders(),
     fleet: DEFAULT_FLEET,
     units: () => data.units(),
+    store: localRecords,
   });
   const hub = new TrackingHub({
     units: () => planner.units(),
     activePlan: () => planner.activePlan(),
+    store: localRecords,
   });
+  planner.onPublish((plan) => hub.planPublished(plan));
   localEngine = { data, planner, hub };
   return localEngine;
 }
 
-/** Motor con los datos guardados ya cargados. */
+/** Motor con los datos, planes y rutas guardados ya cargados. */
 async function ready() {
   const current = engine();
-  await current.data.ready;
+  await Promise.all([current.data.ready, current.planner.ready, current.hub.ready]);
   return current;
 }
 
@@ -104,16 +140,6 @@ export const localApi: TorreApi = {
 
   products: async () =>
     (await ready()).data.products().map((p) => ({ ...p, unitVolumeM3: unitVolumeM3(p) })),
-  cartTypes: async () => Object.values(DEFAULT_CART_SPECS),
-  mixCheck: (request) =>
-    run(async () => {
-      const cart = DEFAULT_CART_SPECS[request.cartType];
-      const [incoming, ...current] = await resolveLines(catalog, [
-        request.incoming,
-        ...request.currentLines,
-      ]);
-      return { cart, ...checkCartAddition(cart, current, incoming) };
-    }),
   cubicaje: (request) =>
     run(async () =>
       planLoad(await resolveLines(catalog, request.lines), DEFAULT_FLEET, {
@@ -131,16 +157,19 @@ export const localApi: TorreApi = {
 
   fleetUnits: async () => (await ready()).planner.fleetUnits(),
   startDriverSession: (input) => run(async () => (await ready()).hub.startSession(input)),
-  sendPositions: (sessionId, fixes) => run(async () => engine().hub.ingest(sessionId, fixes)),
-  endDriverSession: (sessionId) => run(async () => engine().hub.endSession(sessionId)),
-  deviceTrack: (sessionId) => run(async () => engine().hub.track(sessionId)),
+  sendPositions: (sessionId, fixes) =>
+    run(async () => (await ready()).hub.ingest(sessionId, fixes)),
+  endDriverSession: (sessionId) => run(async () => (await ready()).hub.endSession(sessionId)),
+  completeStop: (sessionId, deliveryId) =>
+    run(async () => (await ready()).hub.completeStop(sessionId, deliveryId)),
+  deviceTrack: (sessionId) => run(async () => (await ready()).hub.track(sessionId)),
   liveFleet: async () => (await ready()).hub.snapshot(),
   subscribeFleet: (onSnapshot) => {
     const { hub } = engine();
     const unsubscribe = hub.subscribe(onSnapshot);
     subscribers++;
     refreshTimer ??= setInterval(() => hub.refresh(), REFRESH_MS);
-    onSnapshot(hub.snapshot());
+    void hub.ready.then(() => onSnapshot(hub.snapshot()));
     return () => {
       unsubscribe();
       subscribers--;

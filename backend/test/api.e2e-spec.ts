@@ -26,13 +26,15 @@ describe('API Torre de Control (e2e)', () => {
       .expect(200)
       .expect({ status: 'ok', service: 'torre-control-api' }));
 
-  it('POST /api/v1/picking/mix-check bloquea cemento con herramientas', async () => {
+  it('POST /api/v1/picking/cart-audit bloquea cemento con herramientas', async () => {
     const res = await request(app.getHttpServer())
-      .post('/api/v1/picking/mix-check')
+      .post('/api/v1/picking/cart-audit')
       .send({
         cartType: 'MODULAR',
-        currentLines: [{ sku: 'MAK-HP1630', quantity: 1 }],
-        incoming: { sku: 'CEM-ESP-25', quantity: 2 },
+        lines: [
+          { sku: 'MAK-HP1630', quantity: 1 },
+          { sku: 'CEM-ESP-25', quantity: 2 },
+        ],
       })
       .expect(200);
 
@@ -41,7 +43,7 @@ describe('API Torre de Control (e2e)', () => {
     expect(res.body.violations[0]).toMatchObject({
       rule: 'MEZCLA_INCOMPATIBLE',
       severity: 'BLOQUEO',
-      skus: ['CEM-ESP-25', 'MAK-HP1630'],
+      skus: ['MAK-HP1630', 'CEM-ESP-25'],
     });
   });
 
@@ -57,14 +59,14 @@ describe('API Torre de Control (e2e)', () => {
 
   it('responde 400 con detalle por campo cuando el body es inválido', async () => {
     const res = await request(app.getHttpServer())
-      .post('/api/v1/picking/mix-check')
-      .send({ cartType: 'CARRETILLA', incoming: { sku: 'MAK-HP1630', quantity: -1 } })
+      .post('/api/v1/picking/cart-audit')
+      .send({ cartType: 'CARRETILLA', lines: [{ sku: 'MAK-HP1630', quantity: -1 }] })
       .expect(400);
 
     expect(res.body.code).toBe('SOLICITUD_INVALIDA');
     expect(res.body.issues.map((i: { path: string }) => i.path)).toEqual([
       'cartType',
-      'incoming.quantity',
+      'lines.0.quantity',
     ]);
   });
 

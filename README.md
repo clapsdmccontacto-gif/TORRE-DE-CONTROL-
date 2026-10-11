@@ -33,7 +33,9 @@ Esta primera entrega deja la base del proyecto:
 | **Optimizador de rutas** por consumo de diésel, con ahorro frente al despacho manual | Hecho, con tests |
 | **Datos de la empresa** (camiones, bodega, productos, obras, pedidos) guardados en PostgreSQL | Hecho, con tests (incluye PostgreSQL real) |
 | Publicación en internet (Docker + Render + PostgreSQL gratis) con clave de acceso | Listo para activar (sección 6) |
-| Recorridos GPS en PostgreSQL, login por roles, staging, restricciones, e-POD | Próximas fases (ver hoja de ruta) |
+| Planes publicados y rutas de conductores (avance y recorrido) guardados en PostgreSQL; entrega registrada por el conductor | Hecho, con tests (incluye PostgreSQL real) |
+| Importación desde Excel, e-POD con firma y foto, picking y despacho con código de barras | En construcción (fases 2 a 5) |
+| Login por roles, staging, restricciones de circulación | Próximas fases (ver hoja de ruta) |
 
 ---
 
@@ -145,9 +147,11 @@ TORRE-DE-CONTROL-/
 │   │       │   └── infrastructure/ # tomtom.ts (rutas con tráfico) · overpass.ts
 │   │       │                     #   (semáforos y peajes de OpenStreetMap)
 │   │       ├── tracking/         # RASTREO GPS de conductores
-│   │       │   ├── domain/       #   tracking.ts (filtro GPS, paradas, aviso)
+│   │       │   ├── domain/       #   tracking.ts (filtro GPS, paradas, aviso, entrega)
 │   │       │   ├── application/  #   tracking-hub.ts (sesiones, eventos, flota en vivo)
 │   │       │   └── http/         #   tracking.controller.ts (+ flujo SSE /tracking/stream)
+│   │       ├── storage/          # registros de la operación en PostgreSQL (ops_records):
+│   │       │                     #   planes publicados y rutas con su avance
 │   │       ├── staging/              (fase 2) andenes, reservas y pallets con QR
 │   │       ├── route-restrictions/   (fase 3) evaluador de la matriz urbana/rural
 │   │       ├── notifications/        (fase 3) outbox → WhatsApp/SMS
@@ -167,12 +171,11 @@ TORRE-DE-CONTROL-/
         │                         # BasemapControl.tsx (TomTom/Esri/MapTiler, tráfico, clave)
         ├── features/
         │   ├── master-data/                      # Flota y bodega · Productos · Obras y pedidos
-        │   ├── picking/MixCheckPage.tsx          # validador de mezcla
         │   ├── load-planning/CubicajePage.tsx    # cubicaje de carga
         │   ├── routing/RoutePlannerPage.tsx      # optimizar, ajustar por calles y publicar
         │   ├── routing/RoadRouteDetails.tsx      # detalle: tráfico, peajes, semáforos, Waze
         │   ├── tracking/LiveMapPage.tsx          # mapa en vivo de la flota
-        │   ├── tracking/DriverPage.tsx           # modo conductor (GPS del teléfono)
+        │   ├── tracking/DriverPage.tsx           # modo conductor (GPS, llegada, entrega)
         │   ├── picking-monitor/                  (fase 2)
         │   ├── staging/                          (fase 2)
         │   └── epod/                             (fase 3) firma y foto de la entrega
@@ -331,7 +334,8 @@ erDiagram
 ### 5.1 Validación de mezcla incompatible (picking)
 
 `backend/src/modules/picking/domain/mix-validator.ts`. Cuando el picker escanea un ítem,
-se evalúa contra lo que ya está en el carro:
+se evalúa contra lo que ya está en el carro (la pantalla aparte del validador se quitó: las
+reglas se aplicarán solas en el picking con escaneo):
 
 | Regla | Severidad | Ejemplo |
 |---|---|---|
@@ -347,14 +351,13 @@ en los que participa el ítem entrante (lo que ya estaba en el carro ya fue resu
 autorizado). `auditCart` revisa el carro completo.
 
 ```http
-POST /api/v1/picking/mix-check
+POST /api/v1/picking/cart-audit
 { "cartType": "MODULAR",
-  "currentLines": [{ "sku": "MAK-HP1630", "quantity": 1 }],
-  "incoming": { "sku": "CEM-ESP-25", "quantity": 2 } }
+  "lines": [{ "sku": "MAK-HP1630", "quantity": 1 }, { "sku": "CEM-ESP-25", "quantity": 2 }] }
 
 200 → { "decision": "BLOQUEADO",
         "violations": [{ "rule": "MEZCLA_INCOMPATIBLE", "severity": "BLOQUEO",
-                         "skus": ["CEM-ESP-25", "MAK-HP1630"], "message": "Mezcla incompatible: ..." }],
+                         "skus": ["MAK-HP1630", "CEM-ESP-25"], "message": "Mezcla incompatible: ..." }],
         "load": { "totalWeightKg": 52.3, "weightUtilization": 0.209, ... },
         "cart": { "type": "MODULAR", "maxLoadKg": 250, ... } }
 ```
@@ -399,21 +402,37 @@ llamar al cubicaje.
   y teléfono (opcional, para que la torre lo llame), elige su camión de la lista de *Flota y
   bodega* y toca *Activar GPS e iniciar ruta*; el teléfono recuerda sus datos. Envía su
   posición cada 5 s; si pierde señal acumula las lecturas y las manda al recuperarla. Si el
-  servidor se reinicia, la ruta se retoma sola (`SESION_DESCONOCIDA`). Ve su próxima obra con
-  la hora estimada de llegada, sus paradas, lo que lleva y botones para navegar con Waze.
+  servidor se reinicia, la ruta sigue igual (queda guardada, ver abajo). Ve su próxima obra
+  con la hora estimada de llegada, sus paradas, lo que lleva y botones para navegar con Waze.
+  Si el camión todavía no tiene pedidos, la app le dice que pida publicar el plan; cuando la
+  torre lo publica, las paradas le llegan solas, sin reiniciar la ruta.
+- **Enlace del conductor** (*Flota y bodega*): trae la clave y deja al teléfono **sólo en el
+  modo conductor**, sin el menú de oficina, aunque se recargue o cambie la dirección
+  (`app=conductor`, guardado en el teléfono; abajo hay un botón para salir).
+- **Pantalla encendida** con la Wake Lock API mientras la ruta está activa (se vuelve a pedir
+  al volver a la app). Si el navegador no la permite, la app avisa que se deje el bloqueo
+  automático del teléfono en «Nunca».
 - **Filtro del GPS** (`tracking/domain/tracking.ts`): descarta lecturas con más de 100 m de
   error, fuera de orden o con saltos imposibles (más de 150 km/h).
 - **Paradas y avisos**: con la ETA (línea recta × 1,3 a la velocidad actual o 40 km/h) se
-  registra *AVISO_PROXIMIDAD* cuando falta lo configurado para la obra (15 min, una sola vez),
-  *LLEGADA_OBRA* al entrar a 150 m y *SALIDA_OBRA* al salir (descarga terminada).
+  registra *AVISO_PROXIMIDAD* cuando falta lo configurado para la obra (15 min, una sola vez)
+  y *LLEGADA_OBRA* al entrar a 150 m de cualquier obra pendiente: la app sólo **sugiere**
+  «Llegó a la obra». La entrega **no se marca sola**: el conductor toca *Registrar entrega* y
+  confirma (*ENTREGA_REGISTRADA*). Si sale (más de 250 m) sin registrarla, *SALIDA_OBRA* avisa
+  a la torre y la obra vuelve a pendiente.
 - **Mapa en vivo** (`#mapa`): todos los vehículos en ruta con su estado (en movimiento,
   detenido, sin señal), trayecto recorrido, paradas pendientes, carga a bordo y feed de
   eventos. Se actualiza por Server-Sent Events, sin recargar. Al elegir un vehículo, *lo
   que falta* (punteado) se dibuja por calles desde su posición, por sus obras pendientes y
   de vuelta a la bodega (una consulta a TomTom al elegirlo y al terminar cada obra).
-- Sin simulación: en el mapa sólo aparecen los teléfonos de conductores reales. Las
-  sesiones y recorridos viven en la memoria del servidor (se guardan en PostgreSQL en la
-  fase 3); los datos de la empresa sí quedan guardados (sección 5.6).
+- Sin simulación: en el mapa sólo aparecen los teléfonos de conductores reales.
+- **Todo queda guardado** (módulo `storage`, tabla `ops_records`, migración 005): planes de
+  ruta y cuál está publicado, cada ruta de conductor con el avance de sus paradas y sus
+  últimas 1.000 lecturas, y los eventos recientes del mapa. Un reinicio o un despertar del
+  servidor gratuito de Render no borra nada: el teléfono sigue enviando a la misma ruta. Las
+  lecturas GPS se guardan cada 15 s por ruta (al apagar el servidor se guarda lo pendiente);
+  una ruta sin señal por 12 h se cierra sola y las terminadas se borran a los 2 días. En el
+  modo local, lo mismo queda en el navegador.
 
 Límite importante: el navegador del teléfono **sólo envía la ubicación con la app abierta en
 pantalla** (se pide mantener la pantalla encendida). El rastreo con el teléfono bloqueado o en
@@ -536,13 +555,15 @@ navegador de ese equipo.
 | POST | `/api/v1/tracking/sessions` | Inicia la ruta de un conductor |
 | POST | `/api/v1/tracking/sessions/:id/positions` | Lote de lecturas GPS (hasta 500) |
 | POST | `/api/v1/tracking/sessions/:id/end` | Termina la ruta |
+| POST | `/api/v1/tracking/sessions/:id/stops/:deliveryId/complete` | El conductor registra la entrega del pedido |
 | GET | `/api/v1/tracking/sessions/:id/track` | Trayecto recorrido y resumen |
 | GET | `/api/v1/tracking/live` · `/api/v1/tracking/stream` | Flota en vivo (foto · flujo SSE) |
 
 Errores: `400 SOLICITUD_INVALIDA` con detalle por campo (Zod) y `422` para reglas de negocio
 (`SKU_DESCONOCIDO`, `CANTIDAD_INVALIDA`, `CARGA_VACIA`, `AJUSTE_INVALIDO`, `PLAN_PUBLICADO`,
 `PATENTE_INVALIDA`, `SIN_BODEGA`, `SIN_VEHICULOS`, `OBRA_CON_PEDIDOS`, `PRODUCTO_EN_USO`,
-`SESION_DESCONOCIDA`, `NUBE_YA_CONFIGURADA`), `401 CLAVE_INCORRECTA`, `403 NUBE_SIN_CLAVE` y
+`SESION_DESCONOCIDA`, `PARADA_DESCONOCIDA`, `NUBE_YA_CONFIGURADA`), `401 CLAVE_INCORRECTA`,
+`403 NUBE_SIN_CLAVE` y
 `429 DEMASIADOS_INTENTOS`.
 
 ## 6. Usar la app
@@ -588,8 +609,8 @@ app busca está en `frontend/src/lib/cloud.ts` y depende del nombre del servicio
 Notas: el plan gratuito de Render duerme tras 15 minutos sin uso (la primera visita tarda
 cerca de un minuto; mientras un conductor envía su GPS no duerme). La base PostgreSQL
 gratuita de Render **vence a los 30 días**: antes de eso, pasarla al plan pagado o apuntar
-`DATABASE_URL` a otra base (por ejemplo Neon o Supabase, que tienen plan gratuito). Las
-rutas en curso viven en memoria: si el servidor se reinicia, los teléfonos las retoman solos.
+`DATABASE_URL` a otra base (por ejemplo Neon o Supabase, que tienen plan gratuito). Planes
+publicados y rutas en curso quedan en la base: un reinicio no los borra.
 Cualquier servicio que ejecute Docker sirve igual (Railway, Fly.io, un VPS).
 
 ### Abrir desde el celular o el computador
@@ -622,7 +643,8 @@ npm run build:html     # app en un solo archivo: frontend/dist/torre-control.htm
 npm run db:up          # PostgreSQL + PostGIS con el esquema (sin datos de muestra)
 ```
 
-Sin `DATABASE_URL` la API guarda los datos de la empresa en memoria; con
+Sin `DATABASE_URL` la API guarda los datos de la empresa, los planes y las rutas en memoria;
+con
 `DATABASE_URL=postgres://torre:torre_dev@localhost:5432/torre_control` (ver `.env.example`)
 los guarda en la base de `npm run db:up`.
 

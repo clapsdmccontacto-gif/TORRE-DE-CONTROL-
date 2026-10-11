@@ -8,6 +8,8 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   // La API la protege la clave de acceso de la empresa (módulo cloud), que se crea en la
   // propia app: no hay contraseñas del navegador ni de Render que buscar.
+  // Render detiene el servicio con SIGTERM al desplegar: se guarda lo pendiente antes.
+  app.enableShutdownHooks();
   configureApp(app);
   // En producción el mismo servicio entrega la interfaz (build del frontend en modo API).
   if (process.env.STATIC_DIR) app.useStaticAssets(resolve(process.env.STATIC_DIR));

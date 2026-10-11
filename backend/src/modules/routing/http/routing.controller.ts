@@ -19,25 +19,31 @@ export class RoutingController {
 
   @Post('optimize')
   @HttpCode(200)
-  optimize(@Body(new ZodValidationPipe(optimizeSchema)) body: OptimizeRequest) {
-    return this.planner.optimize(body);
+  async optimize(@Body(new ZodValidationPipe(optimizeSchema)) body: OptimizeRequest) {
+    const plan = this.planner.optimize(body);
+    await this.planner.flush();
+    return plan;
   }
 
   /** Ruta por calles con tráfico calculada en el navegador (TomTom) para una ruta del plan. */
   @Post('plans/:id/routes/:plate/road')
   @HttpCode(200)
-  applyRoad(
+  async applyRoad(
     @Param('id') id: string,
     @Param('plate') plate: string,
     @Body(new ZodValidationPipe(roadAdjustmentSchema)) body: RoadAdjustmentRequest,
   ) {
-    return this.planner.applyRoadAdjustment(id, plate, body);
+    const plan = this.planner.applyRoadAdjustment(id, plate, body);
+    await this.planner.flush();
+    return plan;
   }
 
   @Post('plans/:id/publish')
   @HttpCode(200)
-  publish(@Param('id') id: string) {
-    return this.planner.publish(id);
+  async publish(@Param('id') id: string) {
+    const plan = this.planner.publish(id);
+    await this.planner.flush();
+    return plan;
   }
 
   @Get('plans/active')

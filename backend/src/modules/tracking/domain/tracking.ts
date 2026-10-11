@@ -1,3 +1,4 @@
+import { DomainError } from '../../../common/domain-error.js';
 import { distanceMeters, isValidLatLng, type LatLng } from '../../../common/geo.js';
 
 /** Lectura GPS enviada por el teléfono del conductor. */
@@ -132,7 +133,8 @@ export interface TrackedStop {
   proximityNotified: boolean;
 }
 
-export type TrackingEventType = 'AVISO_PROXIMIDAD' | 'LLEGADA_OBRA' | 'SALIDA_OBRA';
+export type TrackingEventType =
+  'AVISO_PROXIMIDAD' | 'LLEGADA_OBRA' | 'SALIDA_OBRA' | 'ENTREGA_REGISTRADA';
 
 export interface StopEvent {
   type: TrackingEventType;
@@ -148,11 +150,15 @@ export interface StopProgress {
   nextStopEtaMin: number | null;
 }
 
+/** Metros más allá del radio para dar por salida (evita que el ruido del GPS entre y salga). */
+const GEOFENCE_EXIT_MARGIN_M = 100;
+
 /**
- * Avanza el estado de las paradas con una nueva posición:
+ * Avanza el estado de las paradas con una nueva posición. La geocerca sólo **sugiere**: la
+ * entrega la registra el conductor (`completeStop`), nunca se marca sola.
+ * - Entra al radio de una obra pendiente → LLEGADA_OBRA (EN_OBRA: «Llegó a la obra»).
+ * - Sale (radio + margen) sin registrar la entrega → SALIDA_OBRA y vuelve a PENDIENTE.
  * - ETA a la próxima obra ≤ aviso configurado → AVISO_PROXIMIDAD (una sola vez).
- * - Entra al radio de la obra → LLEGADA_OBRA (EN_OBRA).
- * - Sale del radio después de llegar → SALIDA_OBRA (COMPLETADA) y pasa a la siguiente.
  */
 export function progressStops(
   stops: readonly TrackedStop[],
@@ -162,48 +168,71 @@ export function progressStops(
 ): StopProgress {
   const next = stops.map((s) => ({ ...s }));
   const events: StopEvent[] = [];
-  const current = next.find((s) => s.state !== 'COMPLETADA');
-  if (!current) return { stops: next, events, nextStopEtaMin: null };
-
-  const inside = distanceMeters(position, current.location) <= policy.geofenceRadiusM;
-
-  if (current.state === 'EN_OBRA') {
-    if (inside) return { stops: next, events, nextStopEtaMin: 0 };
-    current.state = 'COMPLETADA';
-    events.push({
-      type: 'SALIDA_OBRA',
-      deliveryId: current.deliveryId,
-      siteName: current.siteName,
-      etaMinutes: null,
-    });
-    const following = next.find((s) => s.state === 'PENDIENTE');
-    return {
-      stops: next,
-      events,
-      nextStopEtaMin: following ? etaMinutes(position, following.location, speedKmh, policy) : null,
-    };
+  for (const stop of next) {
+    if (stop.state === 'COMPLETADA') continue;
+    const meters = distanceMeters(position, stop.location);
+    if (stop.state === 'PENDIENTE' && meters <= policy.geofenceRadiusM) {
+      stop.state = 'EN_OBRA';
+      stop.proximityNotified = true; // Ya llegó: no tiene sentido avisar después.
+      events.push(stopEvent('LLEGADA_OBRA', stop, 0));
+    } else if (
+      stop.state === 'EN_OBRA' &&
+      meters > policy.geofenceRadiusM + GEOFENCE_EXIT_MARGIN_M
+    ) {
+      stop.state = 'PENDIENTE';
+      events.push(stopEvent('SALIDA_OBRA', stop, null));
+    }
   }
 
-  if (inside) {
-    current.state = 'EN_OBRA';
-    events.push({
-      type: 'LLEGADA_OBRA',
-      deliveryId: current.deliveryId,
-      siteName: current.siteName,
-      etaMinutes: 0,
-    });
-    return { stops: next, events, nextStopEtaMin: 0 };
+  const target = targetStop(next);
+  if (target?.state === 'PENDIENTE') {
+    const eta = etaMinutes(position, target.location, speedKmh, policy);
+    if (!target.proximityNotified && eta <= target.notifyEtaMinutes) {
+      target.proximityNotified = true;
+      events.push(stopEvent('AVISO_PROXIMIDAD', target, eta));
+    }
   }
+  return { stops: next, events, nextStopEtaMin: nextStopEta(next, position, speedKmh, policy) };
+}
 
-  const eta = etaMinutes(position, current.location, speedKmh, policy);
-  if (!current.proximityNotified && eta <= current.notifyEtaMinutes) {
-    current.proximityNotified = true;
-    events.push({
-      type: 'AVISO_PROXIMIDAD',
-      deliveryId: current.deliveryId,
-      siteName: current.siteName,
-      etaMinutes: eta,
-    });
+/** El conductor registró la entrega: la parada queda COMPLETADA (repetirlo no hace nada). */
+export function completeStop(
+  stops: readonly TrackedStop[],
+  deliveryId: string,
+): { stops: TrackedStop[]; event: StopEvent | null } {
+  const index = stops.findIndex((s) => s.deliveryId === deliveryId);
+  if (index === -1) {
+    throw new DomainError('PARADA_DESCONOCIDA', `La ruta no tiene el pedido ${deliveryId}.`);
   }
-  return { stops: next, events, nextStopEtaMin: eta };
+  if (stops[index].state === 'COMPLETADA') return { stops: [...stops], event: null };
+  const next = stops.map((s, i) => (i === index ? { ...s, state: 'COMPLETADA' as const } : s));
+  return { stops: next, event: stopEvent('ENTREGA_REGISTRADA', next[index], null) };
+}
+
+/** Próxima parada: la obra donde está el camión o, si no, la primera pendiente de la ruta. */
+export function targetStop<T extends { state: StopState }>(stops: readonly T[]): T | null {
+  return (
+    stops.find((s) => s.state === 'EN_OBRA') ?? stops.find((s) => s.state === 'PENDIENTE') ?? null
+  );
+}
+
+/** Minutos a la próxima parada (0 si ya está en la obra; null sin paradas o sin posición). */
+export function nextStopEta(
+  stops: readonly TrackedStop[],
+  position: LatLng | null,
+  speedKmh: number | null,
+  policy: TrackingPolicy = DEFAULT_TRACKING_POLICY,
+): number | null {
+  const target = targetStop(stops);
+  if (!target) return null;
+  if (target.state === 'EN_OBRA') return 0;
+  return position ? etaMinutes(position, target.location, speedKmh, policy) : null;
+}
+
+function stopEvent(
+  type: TrackingEventType,
+  stop: TrackedStop,
+  etaMinutes: number | null,
+): StopEvent {
+  return { type, deliveryId: stop.deliveryId, siteName: stop.siteName, etaMinutes };
 }

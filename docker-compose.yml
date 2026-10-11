@@ -18,6 +18,7 @@ services:
       - ./database/migrations/002_tracking_routing.sql:/docker-entrypoint-initdb.d/21_002_tracking_routing.sql:ro
       - ./database/migrations/003_road_routing.sql:/docker-entrypoint-initdb.d/22_003_road_routing.sql:ro
       - ./database/migrations/004_app_state.sql:/docker-entrypoint-initdb.d/23_004_app_state.sql:ro
+      - ./database/migrations/005_operations.sql:/docker-entrypoint-initdb.d/24_005_operations.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U torre -d torre_control"]
       interval: 5s

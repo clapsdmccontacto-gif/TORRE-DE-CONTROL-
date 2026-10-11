@@ -1,6 +1,7 @@
 import { DomainError } from '../../../common/domain-error.js';
 import type { LatLng } from '../../../common/geo.js';
 import { newId } from '../../../common/ids.js';
+import { WriteQueue, type RecordStore } from '../../../common/record-store.js';
 import type { VehicleType } from '../../load-planning/domain/vehicle.js';
 import { toDeliveryRequest, type DeliveryOrder } from '../domain/delivery.js';
 import {
@@ -43,24 +44,38 @@ export interface RoutePlannerDeps {
   orders: () => readonly DeliveryOrder[];
   fleet: readonly VehicleType[];
   units: () => readonly FleetUnit[];
+  /** Dónde se guardan los planes (y cuál está publicado) para no perderlos al reiniciar. */
+  store?: RecordStore;
   now?: () => number;
 }
 
 const MAX_STORED_PLANS = 20;
+const PLANS = 'route-plans';
+const ROUTING = 'routing';
+const ACTIVE = 'active';
 
 /**
  * Caso de uso "planificar el despacho": optimiza, guarda planes y publica el plan
  * activo a la flota. Sin dependencias de framework: lo usan el backend y el modo
- * local del frontend.
+ * local del frontend. Con `store`, los planes sobreviven a un reinicio del servidor.
  */
 export class RoutePlanner {
+  /** Planes guardados ya cargados. */
+  readonly ready: Promise<void>;
   private readonly deps: RoutePlannerDeps;
   private readonly plans = new Map<string, RoutePlan>();
   private activeId: string | null = null;
   private readonly listeners = new Set<(plan: RoutePlan) => void>();
+  private readonly writes = new WriteQueue();
 
   constructor(deps: RoutePlannerDeps) {
     this.deps = deps;
+    this.ready = this.restore();
+  }
+
+  /** Espera a que lo cambiado quede guardado (falla si no se pudo guardar). */
+  flush(): Promise<void> {
+    return this.writes.flush();
   }
 
   units(): readonly FleetUnit[] {
@@ -139,6 +154,7 @@ export class RoutePlanner {
       depot,
     };
     this.plans.set(plan.id, plan);
+    this.save(plan);
     this.prune();
     return plan;
   }
@@ -166,6 +182,7 @@ export class RoutePlanner {
     // El ahorro frente al despacho en orden de llegada sigue comparando estimaciones.
     const adjusted: RoutePlan = { ...plan, routes, totals: planTotals(routes) };
     this.plans.set(planId, adjusted);
+    this.save(adjusted);
     return adjusted;
   }
 
@@ -175,6 +192,9 @@ export class RoutePlanner {
     const published = { ...plan, publishedAt: new Date(this.now()).toISOString() };
     this.plans.set(planId, published);
     this.activeId = planId;
+    this.save(published);
+    const store = this.deps.store;
+    if (store) this.writes.enqueue(() => store.put(ROUTING, ACTIVE, { planId }));
     for (const listener of this.listeners) listener(published);
     return published;
   }
@@ -202,7 +222,27 @@ export class RoutePlanner {
   private prune(): void {
     for (const id of this.plans.keys()) {
       if (this.plans.size <= MAX_STORED_PLANS) break;
-      if (id !== this.activeId) this.plans.delete(id);
+      if (id === this.activeId) continue;
+      this.plans.delete(id);
+      const store = this.deps.store;
+      if (store) this.writes.enqueue(() => store.remove(PLANS, id));
     }
+  }
+
+  private save(plan: RoutePlan): void {
+    const store = this.deps.store;
+    if (store) this.writes.enqueue(() => store.put(PLANS, plan.id, plan));
+  }
+
+  private async restore(): Promise<void> {
+    const store = this.deps.store;
+    if (!store) return;
+    const [plans, routing] = await Promise.all([store.list(PLANS), store.list(ROUTING)]);
+    for (const record of plans) {
+      const plan = record.value as RoutePlan | null;
+      if (plan?.id && Array.isArray(plan.routes)) this.plans.set(plan.id, plan);
+    }
+    const active = routing.find((r) => r.id === ACTIVE)?.value as { planId?: string } | null;
+    this.activeId = active?.planId && this.plans.has(active.planId) ? active.planId : null;
   }
 }

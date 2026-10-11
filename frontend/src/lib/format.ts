@@ -55,6 +55,6 @@ export const VEHICLE_SHORT_LABEL: Record<string, string> = {
 
 export const STOP_STATE_LABEL: Record<StopState, string> = {
   PENDIENTE: 'Pendiente',
-  EN_OBRA: 'En obra',
-  COMPLETADA: 'Descargada',
+  EN_OBRA: 'En la obra',
+  COMPLETADA: 'Entregado',
 };

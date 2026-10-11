@@ -58,8 +58,6 @@ function httpApi(baseUrl: string): TorreApi {
     removeOrder: (orderId) => remove(`/master-data/orders/${id(orderId)}`),
 
     products: () => request('/catalog/products'),
-    cartTypes: () => request('/picking/cart-types'),
-    mixCheck: (payload) => post('/picking/mix-check', payload),
     cubicaje: (payload) => post('/load-planning/cubicaje', payload),
 
     deliveries: () => request('/routing/deliveries'),
@@ -79,19 +77,40 @@ function httpApi(baseUrl: string): TorreApi {
       post(`/tracking/sessions/${encodeURIComponent(sessionId)}/positions`, { fixes }),
     endDriverSession: (sessionId) =>
       post(`/tracking/sessions/${encodeURIComponent(sessionId)}/end`, {}),
+    completeStop: (sessionId, deliveryId) =>
+      post(
+        `/tracking/sessions/${encodeURIComponent(sessionId)}/stops/${encodeURIComponent(deliveryId)}/complete`,
+        {},
+      ),
     deviceTrack: (sessionId) =>
       request(`/tracking/sessions/${encodeURIComponent(sessionId)}/track`),
     liveFleet: () => request('/tracking/live'),
     subscribeFleet: (onSnapshot, onError) => {
-      // EventSource reintenta solo si se corta la conexión; no admite cabeceras: la clave va
-      // en la dirección.
+      // EventSource no admite cabeceras: la clave va en la dirección. Reintenta solo si se
+      // corta la conexión, pero se rinde si el servidor no contesta (reinicio o despliegue
+      // en Render): entonces se vuelve a abrir cada 5 s.
       const key = readCloudKey();
-      const source = new EventSource(
-        `${baseUrl}/tracking/stream${key ? `?key=${encodeURIComponent(key)}` : ''}`,
-      );
-      source.onmessage = (event) => onSnapshot(JSON.parse(event.data) as FleetSnapshot);
-      source.onerror = () => onError?.();
-      return () => source.close();
+      const url = `${baseUrl}/tracking/stream${key ? `?key=${encodeURIComponent(key)}` : ''}`;
+      let source: EventSource | null = null;
+      let retry: ReturnType<typeof setTimeout> | null = null;
+      let stopped = false;
+      const open = () => {
+        const current = new EventSource(url);
+        source = current;
+        current.onmessage = (event) => onSnapshot(JSON.parse(event.data) as FleetSnapshot);
+        current.onerror = () => {
+          onError?.();
+          if (current.readyState === EventSource.CLOSED && !stopped) {
+            retry = setTimeout(open, 5_000);
+          }
+        };
+      };
+      open();
+      return () => {
+        stopped = true;
+        if (retry) clearTimeout(retry);
+        source?.close();
+      };
     },
   };
 }

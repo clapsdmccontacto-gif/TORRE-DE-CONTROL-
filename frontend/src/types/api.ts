@@ -38,39 +38,6 @@ export interface SkuQuantity {
   quantity: number;
 }
 
-// --- Picking ------------------------------------------------------------------
-export type CartType = 'MODULAR' | 'PLATAFORMA_PESADA' | 'CARRO_LARGOS';
-
-export interface CartSpec {
-  type: CartType;
-  name: string;
-  maxLoadKg: number;
-  maxVolumeM3: number;
-  maxItemLengthCm: number;
-}
-
-export type MixSeverity = 'ADVERTENCIA' | 'BLOQUEO';
-export type MixDecision = 'PERMITIDO' | 'PERMITIDO_CON_ADVERTENCIA' | 'BLOQUEADO';
-
-export interface MixViolation {
-  rule: string;
-  severity: MixSeverity;
-  message: string;
-  skus: string[];
-}
-
-export interface MixCheckResponse {
-  cart: CartSpec;
-  decision: MixDecision;
-  violations: MixViolation[];
-  load: {
-    totalWeightKg: number;
-    totalVolumeM3: number;
-    weightUtilization: number;
-    volumeUtilization: number;
-  };
-}
-
 // --- Cubicaje -------------------------------------------------------------------
 export interface CubicajeRequest {
   lines: SkuQuantity[];
@@ -121,12 +88,6 @@ export interface ApiErrorBody {
   code: string;
   message: string;
   issues?: { path: string; message: string }[];
-}
-
-export interface MixCheckRequest {
-  cartType: CartType;
-  currentLines: SkuQuantity[];
-  incoming: SkuQuantity;
 }
 
 // --- Rutas y rastreo: mismos tipos que el backend (alias @core), sin copiarlos ---------
@@ -193,8 +154,6 @@ export interface TorreApi {
   removeOrder(id: string): Promise<MasterDataView>;
 
   products(): Promise<Product[]>;
-  cartTypes(): Promise<CartSpec[]>;
-  mixCheck(request: MixCheckRequest): Promise<MixCheckResponse>;
   cubicaje(request: CubicajeRequest): Promise<CubicajeResponse>;
 
   deliveries(): Promise<DeliveryView[]>;
@@ -216,6 +175,8 @@ export interface TorreApi {
   }): Promise<DriverSession>;
   sendPositions(sessionId: string, fixes: PositionFix[]): Promise<IngestResult>;
   endDriverSession(sessionId: string): Promise<DriverSession>;
+  /** El conductor registró la entrega de un pedido de su ruta. */
+  completeStop(sessionId: string, deliveryId: string): Promise<DriverSession>;
   deviceTrack(sessionId: string): Promise<TrackResponse>;
   liveFleet(): Promise<FleetSnapshot>;
   /** Fotos de la flota en vivo; devuelve la función para dejar de escuchar. */

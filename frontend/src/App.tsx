@@ -1,16 +1,11 @@
 import {
-  ClipboardList,
-  Clock,
   HardHat,
   Package,
   Warehouse,
   LoaderCircle,
   Map as MapIcon,
-  PenLine,
-  QrCode,
   RadioTower,
   Route,
-  ShieldAlert,
   Smartphone,
   Truck,
   type LucideIcon,
@@ -22,19 +17,19 @@ import { CubicajePage } from '@/features/load-planning/CubicajePage';
 import { FleetPage } from '@/features/master-data/FleetPage';
 import { ProductsPage } from '@/features/master-data/ProductsPage';
 import { SitesOrdersPage } from '@/features/master-data/SitesOrdersPage';
-import { MixCheckPage } from '@/features/picking/MixCheckPage';
 import { RoutePlannerPage } from '@/features/routing/RoutePlannerPage';
 import { DriverPage } from '@/features/tracking/DriverPage';
 import { LiveMapPage } from '@/features/tracking/LiveMapPage';
 import { api, apiMode, errorMessage } from '@/lib/api';
+import { readDeviceApp, saveDeviceApp } from '@/lib/app-mode';
 import { cn } from '@/lib/utils';
-import type { CartSpec, Product } from '@/types/api';
+import type { Product } from '@/types/api';
 
 interface NavItem {
   label: string;
   icon: LucideIcon;
-  /** Ruta hash (#mezcla); sin ruta = módulo de una fase posterior. */
-  route?: string;
+  /** Ruta hash (#mapa). */
+  route: string;
   description?: string;
 }
 
@@ -60,20 +55,6 @@ const NAV: { group: string; items: NavItem[] }[] = [
         route: 'obras',
         description: 'Dónde se entrega y qué se entrega: lo que planifica el optimizador.',
       },
-    ],
-  },
-  {
-    group: 'Logística interna',
-    items: [
-      { label: 'Monitor de picking', icon: ClipboardList },
-      {
-        label: 'Validador de mezcla',
-        icon: ShieldAlert,
-        route: 'mezcla',
-        description:
-          'Bloquea ítems frágiles o herramientas junto a carga pesada en el mismo carro.',
-      },
-      { label: 'Staging por obra', icon: QrCode },
     ],
   },
   {
@@ -103,8 +84,6 @@ const NAV: { group: string; items: NavItem[] }[] = [
         route: 'conductor',
         description: 'Activa el GPS del teléfono del conductor durante la ruta.',
       },
-      { label: 'Restricción urbana', icon: Clock },
-      { label: 'e-POD', icon: PenLine },
     ],
   },
 ];
@@ -124,18 +103,18 @@ function useHashRoute(): string {
 
 interface Catalog {
   products: Product[];
-  cartTypes: CartSpec[];
 }
 
-/** Catálogo para mezcla y cubicaje; se vuelve a leer al entrar (pudo cambiar en «Productos»). */
+/** Catálogo para el cubicaje; se vuelve a leer al entrar (pudo cambiar en «Productos»). */
 function useCatalog(needed: boolean) {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     if (!needed) return;
     let active = true;
-    Promise.all([api.products(), api.cartTypes()])
-      .then(([products, cartTypes]) => active && setCatalog({ products, cartTypes }))
+    api
+      .products()
+      .then((products) => active && setCatalog({ products }))
       .catch((e: unknown) => active && setError(errorMessage(e)));
     return () => {
       active = false;
@@ -146,14 +125,21 @@ function useCatalog(needed: boolean) {
 
 export default function App() {
   const route = useHashRoute();
+  // Abierto con el enlace del conductor: sólo el modo conductor, sin el menú de oficina.
+  const [deviceApp, setDeviceApp] = useState(readDeviceApp);
   const items = NAV.flatMap((g) => g.items);
   const current =
     items.find((item) => item.route === route) ??
     items.find((item) => item.route === DEFAULT_ROUTE)!;
-  const needsCatalog = current.route === 'mezcla' || current.route === 'cubicaje';
+  const needsCatalog = !deviceApp && current.route === 'cubicaje';
   const { catalog, error } = useCatalog(needsCatalog);
 
-  if (current.route === 'conductor') {
+  if (deviceApp === 'conductor' || current.route === 'conductor') {
+    const leaveDriverApp = () => {
+      saveDeviceApp(null);
+      setDeviceApp(null);
+      window.location.hash = DEFAULT_ROUTE;
+    };
     return (
       <div className="min-h-svh">
         <header className="flex items-center justify-between gap-3 border-b bg-card px-4 py-3">
@@ -164,15 +150,26 @@ export default function App() {
               <p className="text-xs text-muted-foreground">Torre de Control · Constructor Center</p>
             </div>
           </div>
-          <a
-            href="#mapa"
-            className="text-sm text-muted-foreground underline-offset-4 hover:underline"
-          >
-            Torre de control
-          </a>
+          {!deviceApp && (
+            <a
+              href="#mapa"
+              className="text-sm text-muted-foreground underline-offset-4 hover:underline"
+            >
+              Torre de control
+            </a>
+          )}
         </header>
-        <main className="p-4">
+        <main className="grid gap-6 p-4">
           <DriverPage />
+          {deviceApp && (
+            <button
+              type="button"
+              onClick={leaveDriverApp}
+              className="justify-self-center text-xs text-muted-foreground underline-offset-4 hover:underline"
+            >
+              ¿No es conductor? Abrir la app completa
+            </button>
+          )}
         </main>
       </div>
     );
@@ -219,11 +216,9 @@ export default function App() {
             <p className="text-sm text-muted-foreground">{current.description}</p>
           )}
           <nav className="mt-3 flex flex-wrap gap-2 lg:hidden">
-            {NAV.flatMap((g) => g.items)
-              .filter((item) => item.route)
-              .map((item) => (
-                <NavLink key={item.label} item={item} active={item === current} />
-              ))}
+            {NAV.flatMap((g) => g.items).map((item) => (
+              <NavLink key={item.label} item={item} active={item === current} />
+            ))}
           </nav>
         </header>
 
@@ -255,9 +250,6 @@ export default function App() {
           {current.route === 'cubicaje' && catalog && catalog.products.length > 0 && (
             <CubicajePage products={catalog.products} />
           )}
-          {current.route === 'mezcla' && catalog && catalog.products.length > 0 && (
-            <MixCheckPage products={catalog.products} cartTypes={catalog.cartTypes} />
-          )}
         </main>
       </div>
     </div>
@@ -270,18 +262,9 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
     <>
       <Icon className="size-4 shrink-0" aria-hidden />
       <span className="min-w-0 truncate">{item.label}</span>
-      {!item.route && (
-        <Badge variant="secondary" className="ml-auto">
-          Próximamente
-        </Badge>
-      )}
     </>
   );
   const className = 'flex items-center gap-2 rounded-md px-2 py-1.5 text-sm';
-
-  if (!item.route) {
-    return <span className={cn(className, 'text-muted-foreground')}>{content}</span>;
-  }
   return (
     <a
       href={`#${item.route}`}

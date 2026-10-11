@@ -1,11 +1,12 @@
 import { DomainError } from '../../../common/domain-error.js';
+import { MemoryRecordStore } from '../../../common/record-store.js';
 import { DEFAULT_FLEET } from '../../load-planning/infrastructure/default-fleet.js';
 import { RoutePlanner } from '../../routing/application/route-planner.js';
 import { DEMO_DEPOT, DEMO_ORDERS, DEMO_UNITS } from '../../../../test/fixtures/demo-network.js';
 import type { PositionFix } from '../domain/tracking.js';
 import { TrackingHub } from './tracking-hub.js';
 
-function setup() {
+function setup(options: { store?: MemoryRecordStore; publish?: boolean } = {}) {
   let now = Date.parse('2026-10-02T12:00:00Z');
   let units = [...DEMO_UNITS];
   const planner = new RoutePlanner({
@@ -19,14 +20,19 @@ function setup() {
     deliveryIds: DEMO_ORDERS.map((o) => o.id),
     dieselPriceClp: 1_050,
   });
-  planner.publish(plan.id);
-  const hub = new TrackingHub({
-    units: () => units,
-    activePlan: () => planner.activePlan(),
-    now: () => now,
-  });
+  if (options.publish !== false) planner.publish(plan.id);
+  const newHub = () =>
+    new TrackingHub({
+      units: () => units,
+      activePlan: () => planner.activePlan(),
+      now: () => now,
+      store: options.store,
+    });
+  const hub = newHub();
   return {
     hub,
+    newHub,
+    planner,
     plan,
     setUnits: (next: typeof units) => (units = next),
     advance: (ms: number) => (now += ms),
@@ -71,6 +77,89 @@ describe('TrackingHub', () => {
       expect.arrayContaining(['INICIO_RUTA', 'LLEGADA_OBRA']),
     );
     expect(hub.track(session.id).fixes).toHaveLength(3);
+  });
+
+  it('la entrega la registra el conductor: salir de la obra no la marca', () => {
+    const { hub, plan, at, advance } = setup();
+    const route = plan.routes.find((r) => r.unitPlate === 'DEMO-03')!;
+    const [first, second] = route.stops;
+    const session = hub.startSession({ driverName: 'Juan Pérez', vehiclePlate: 'DEMO-03' });
+    hub.ingest(session.id, [fixAt(first.location.lat + 0.0005, first.location.lng, at(0))]);
+    advance(10 * 60_000);
+    hub.ingest(session.id, [fixAt(first.location.lat + 0.02, first.location.lng, at(0))]);
+    const left = hub.snapshot().devices[0];
+    expect(left.stops[0].state).toBe('PENDIENTE');
+    expect(left.nextStop?.siteName).toBe(first.siteName);
+    expect(hub.snapshot().events[0].message).toContain('sin registrar la entrega');
+
+    const done = hub.completeStop(session.id, first.deliveryId);
+    expect(done.stops[0].state).toBe('COMPLETADA');
+    const device = hub.snapshot().devices[0];
+    expect(device.nextStop?.siteName).toBe(second?.siteName);
+    expect(device.cargo.map((c) => c.sku)).not.toEqual(left.cargo.map((c) => c.sku));
+    expect(hub.snapshot().events[0]).toMatchObject({
+      type: 'ENTREGA_REGISTRADA',
+      siteName: first.siteName,
+    });
+    expect(() => hub.completeStop(session.id, 'NV-NO-EXISTE')).toThrow(
+      expect.objectContaining({ code: 'PARADA_DESCONOCIDA' }),
+    );
+  });
+
+  it('un plan publicado después de iniciar llega a la ruta en curso', () => {
+    const { hub, planner, plan } = setup({ publish: false });
+    const session = hub.startSession({ driverName: 'Ana Soto', vehiclePlate: 'DEMO-03' });
+    expect(session.stops).toEqual([]);
+    planner.onPublish((published) => hub.planPublished(published));
+    planner.publish(plan.id);
+    const route = plan.routes.find((r) => r.unitPlate === 'DEMO-03')!;
+    const device = hub.snapshot().devices[0];
+    expect(device.stops.map((s) => s.deliveryId)).toEqual(route.stops.map((s) => s.deliveryId));
+    expect(device.cargo.length).toBeGreaterThan(0);
+    expect(hub.snapshot().events[0].type).toBe('RUTA_ASIGNADA');
+  });
+
+  it('guarda las rutas: tras un reinicio el teléfono sigue en la misma ruta y avance', async () => {
+    const store = new MemoryRecordStore();
+    const { hub, newHub, plan, at } = setup({ store });
+    await hub.ready;
+    const route = plan.routes.find((r) => r.unitPlate === 'DEMO-03')!;
+    const first = route.stops[0];
+    const session = hub.startSession({ driverName: 'Juan Pérez', vehiclePlate: 'DEMO-03' });
+    hub.ingest(session.id, [fixAt(first.location.lat + 0.0005, first.location.lng, at(0))]);
+    hub.completeStop(session.id, first.deliveryId);
+    hub.ingest(session.id, [fixAt(first.location.lat + 0.0006, first.location.lng, at(5))]);
+    await hub.flush();
+
+    const restarted = newHub();
+    await restarted.ready;
+    const device = restarted.snapshot().devices.find((d) => d.sessionId === session.id)!;
+    expect(device.driverName).toBe('Juan Pérez');
+    expect(device.stops[0].state).toBe('COMPLETADA');
+    expect(restarted.track(session.id).fixes).toHaveLength(2);
+    expect(restarted.snapshot().events.map((e) => e.type)).toContain('ENTREGA_REGISTRADA');
+    const next = fixAt(first.location.lat + 0.001, first.location.lng, at(60));
+    expect(restarted.ingest(session.id, [next]).accepted).toBe(1);
+  });
+
+  it('cierra sola una ruta sin señal por 12 h y borra las terminadas hace 2 días', async () => {
+    const store = new MemoryRecordStore();
+    const { hub, newHub, advance } = setup({ store });
+    const old = hub.startSession({ driverName: 'Ana Soto', vehiclePlate: 'DEMO-01' });
+    await hub.flush();
+    advance(13 * 3_600_000);
+    const restarted = newHub();
+    await restarted.ready;
+    expect(restarted.snapshot().devices).toEqual([]);
+    expect(() => restarted.ingest(old.id, [])).toThrow(
+      expect.objectContaining({ code: 'SESION_NO_ACTIVA' }),
+    );
+    await restarted.flush();
+
+    advance(49 * 3_600_000);
+    restarted.startSession({ driverName: 'Luis Rojas', vehiclePlate: 'DEMO-02' });
+    await restarted.flush();
+    expect((await store.list('driver-sessions')).map((r) => r.id)).not.toContain(old.id);
   });
 
   it('marca "sin señal" cuando el teléfono deja de reportar', () => {

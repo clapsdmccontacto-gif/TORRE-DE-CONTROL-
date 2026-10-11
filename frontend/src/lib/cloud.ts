@@ -4,6 +4,8 @@
  * si Render le dio otra); la empresa crea su clave de acceso la primera vez y la comparte
  * con enlaces que la llevan incluida.
  */
+import { isDeviceApp, saveDeviceApp } from '@/lib/app-mode';
+
 export const CLOUD_DEPLOY_URL =
   'https://render.com/deploy?repo=https://github.com/clapsdmccontacto-gif/TORRE-DE-CONTROL-';
 
@@ -62,17 +64,20 @@ export function normalizeCloudUrl(text: string): string | null {
 }
 
 /**
- * Enlaces compartidos traen `?clave=…` y, si la nube no está en la dirección de siempre,
- * `&nube=…` (p. ej. `#conductor?clave=…`): se guardan y se quitan de la barra.
+ * Enlaces compartidos traen `?clave=…`, `&app=conductor` (el equipo queda en esa app) y,
+ * si la nube no está en la dirección de siempre, `&nube=…`: se guardan y se quitan de la
+ * barra. Los enlaces de conductor anteriores (sin `app`) también dejan el modo conductor.
  */
 export function takeLinkParams(): void {
   const [route, query] = window.location.hash.slice(1).split('?');
   const params = new URLSearchParams(query ?? '');
   const key = params.get('clave');
   const cloud = normalizeCloudUrl(params.get('nube') ?? '');
-  if (!key && !cloud) return;
+  const app = params.get('app') ?? (key && route === 'conductor' ? route : null);
+  if (!key && !cloud && !app) return;
   if (key) saveCloudKey(key);
   if (cloud) saveCloudUrl(cloud);
+  if (isDeviceApp(app)) saveDeviceApp(app);
   history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${route}`);
 }
 
@@ -83,12 +88,16 @@ export function setConnectedCloud(origin: string): void {
   connectedCloud = origin;
 }
 
-/** Enlace a esta misma app con la clave (y la nube, si no es la de siempre) incluidas. */
+/**
+ * Enlace a esta misma app con la clave (y la nube, si no es la de siempre) incluidas. El
+ * del conductor deja al teléfono sólo en el modo conductor.
+ */
 export function shareLink(route: string): string {
   const base = window.location.href.split('#')[0];
   const params = new URLSearchParams();
   const key = readCloudKey();
   if (key) params.set('clave', key);
+  if (isDeviceApp(route)) params.set('app', route);
   if (connectedCloud && connectedCloud !== CLOUD_URL && connectedCloud !== window.location.origin) {
     params.set('nube', connectedCloud);
   }

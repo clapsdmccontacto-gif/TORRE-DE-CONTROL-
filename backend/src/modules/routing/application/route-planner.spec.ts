@@ -1,14 +1,16 @@
 import { DomainError } from '../../../common/domain-error.js';
+import { MemoryRecordStore } from '../../../common/record-store.js';
 import { DEFAULT_FLEET } from '../../load-planning/infrastructure/default-fleet.js';
 import { DEMO_DEPOT, DEMO_ORDERS, DEMO_UNITS } from '../../../../test/fixtures/demo-network.js';
 import { RoutePlanner } from './route-planner.js';
 
-const planner = () =>
+const planner = (store?: MemoryRecordStore) =>
   new RoutePlanner({
     depot: () => DEMO_DEPOT,
     orders: () => DEMO_ORDERS,
     fleet: DEFAULT_FLEET,
     units: () => DEMO_UNITS,
+    store,
   });
 
 describe('RoutePlanner', () => {
@@ -34,6 +36,23 @@ describe('RoutePlanner', () => {
     expect(p.activePlan()?.id).toBe(plan.id);
     expect(p.activePlan()?.publishedAt).not.toBeNull();
     expect(published).toEqual([plan.id]);
+  });
+
+  it('guarda los planes y el publicado: un servidor reiniciado los recupera', async () => {
+    const store = new MemoryRecordStore();
+    const first = planner(store);
+    await first.ready;
+    const draft = first.optimize({ deliveryIds: ['NV-100231'], dieselPriceClp: 1_000 });
+    const plan = first.optimize({ deliveryIds: ['NV-100231', 'NV-100235'], dieselPriceClp: 1_000 });
+    first.publish(plan.id);
+    await first.flush();
+
+    const restarted = planner(store);
+    await restarted.ready;
+    expect(restarted.activePlan()).toMatchObject({ id: plan.id, publishedAt: expect.any(String) });
+    expect(restarted.fleetUnits().reduce((n, u) => n + u.stops, 0)).toBe(2);
+    // El borrador también sigue disponible para publicarlo.
+    expect(restarted.publish(draft.id).id).toBe(draft.id);
   });
 
   it('rechaza pedidos o planes inexistentes', () => {
